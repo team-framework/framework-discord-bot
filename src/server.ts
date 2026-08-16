@@ -56,7 +56,9 @@ export function startServer(config: Config, fetchImpl = fetch) {
     if (state.has(deliveryId)) return respond(response, 200, "duplicate");
     const notification = notificationFor(event, payload, config.prOpenRoleId);
     if (!notification) return respond(response, 200, "ignored");
-    await sendDiscordMessage({ token: config.discordToken, channelId: config.channels.get(notification.repository)!, payload: messagePayload(notification, config.users), fetchImpl });
+    const discordPayload = messagePayload(notification, config.users);
+    if (notification.recipients.length > 0 && !discordPayload.content) return respond(response, 200, "recipient not mapped");
+    await sendDiscordMessage({ token: config.discordToken, channelId: config.channels.get(notification.repository)!, payload: discordPayload, fetchImpl });
     state.add(deliveryId);
     await saveDeliveries(config.statePath, state);
     return respond(response, 202, "accepted");

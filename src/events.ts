@@ -39,7 +39,8 @@ export function notificationFor(event: string, payload: any, prOpenRoleId: strin
   }
   if (event === "pull_request" && payload.action === "review_requested") {
     const reviewer = user(payload.requested_reviewer);
-    return { repository, title: `리뷰 요청 · ${prTitle(pr)}`, url: prUrl(pr, repository), body: reviewer ? `${actor}님이 ${reviewer}님에게 리뷰를 요청했어요.` : `${actor}님이 리뷰를 요청했어요.`, recipients: reviewer ? [reviewer] : [] };
+    if (!reviewer) return null;
+    return { repository, title: `리뷰 요청 · ${prTitle(pr)}`, url: prUrl(pr, repository), body: `${actor}님이 ${reviewer}님에게 리뷰를 요청했어요.`, recipients: [reviewer] };
   }
   if (event === "issue_comment" && payload.action === "created" && payload.issue?.pull_request) {
     return { repository, title: `PR 댓글 · ${prTitle(pr)}`, url: text(payload.comment?.html_url) || prUrl(pr, repository), body: commentBody(payload.comment), recipients: author && author !== actor ? [author] : [] };
