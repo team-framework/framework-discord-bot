@@ -1,0 +1,19 @@
+{
+  "name": "framework-discord-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/server.js",
+    "start:gateway": "node dist/src/gateway.js",
+    "dev": "tsx src/server.ts",
+    "dev:gateway": "tsx src/gateway.ts",
+    "test": "tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}
