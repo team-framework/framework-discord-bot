@@ -12,6 +12,9 @@ export type Config = {
   users: DiscordUserMappings;
   prOpenRoleId: string | null;
   statePath: string;
+  teamChannelId: string | null;
+  openAIKey: string | null;
+  openAIModel: string;
 };
 
 function required(env: NodeJS.ProcessEnv, name: string) {
@@ -82,6 +85,9 @@ export function loadConfig(env = process.env): Config {
     channels: parseChannels(required(env, "DISCORD_CHANNELS_JSON"), repositories),
     users: parseUsers(required(env, "DISCORD_USER_MAPPINGS_JSON")),
     prOpenRoleId: role,
-    statePath: env.DELIVERY_STATE_PATH?.trim() || "runtime/deliveries.json"
+    statePath: env.DELIVERY_STATE_PATH?.trim() || "runtime/deliveries.json",
+    teamChannelId: env.DISCORD_TEAM_CHANNEL_ID?.trim() || null,
+    openAIKey: env.OPENAI_API_KEY?.trim() || null,
+    openAIModel: env.OPENAI_MODEL?.trim() || "gpt-5-nano"
   };
 }

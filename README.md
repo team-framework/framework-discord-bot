@@ -11,6 +11,10 @@ GitHub PR 활동만 Discord로 보내는 TypeScript 봇이에요. 기존 `framew
 
 Issue, 브랜치 생성, push, 라벨, workflow, 배포 등은 구독·전송하지 않아요. Discord 메시지는 `allowed_mentions`로 매핑된 사용자와 명시한 역할만 허용해 `@everyone`/`@here`를 절대 호출하지 않아요.
 
+## `/스레드-정리`
+
+기존 main 구현을 TypeScript로 옮겼어요. Gateway가 `/스레드-정리` 명령을 등록하고, 일반 답글 스레드와 독립 생성 스레드의 최근 500개 메시지를 익명화해 OpenAI Responses API로 정리합니다. 결과는 `3줄 요약 → 시간순 타임라인 → 다음 작업` 형식으로 원본 채널에 남기며, `gpt-5-nano`는 `reasoning.effort: minimal`, `store: false`를 사용합니다.
+
 ## GitHub App 설정
 
 별도 read-only GitHub App을 만들거나 기존 activity App의 webhook을 이 봇으로 옮긴 뒤, 다음만 구독하세요.
@@ -31,6 +35,7 @@ npm test
 npm run typecheck
 npm run build
 npm start
+npm run start:gateway
 ```
 
 `.env`와 runtime 상태 파일은 절대 커밋하지 마세요.

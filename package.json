@@ -5,7 +5,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/server.js",
+    "start:gateway": "node dist/src/gateway.js",
     "dev": "tsx src/server.ts",
+    "dev:gateway": "tsx src/gateway.ts",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
