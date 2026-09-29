@@ -33,6 +33,11 @@ export function keepDiscordOnline({ token, WebSocketImpl = WebSocket, onReady = 
   connect(); return () => { stopped = true; clearTimers(); socket?.close(1000, "Framework Bot 종료"); };
 }
 
+export async function runWikiJobs(scan: () => Promise<unknown>, publish: () => Promise<unknown>, log: (message: string) => void = console.error) {
+  try { await scan(); } catch { log("위키 수집을 다음 주기에 다시 확인해요."); }
+  try { await publish(); } catch { log("승인된 위키 작업을 다음 주기에 다시 확인해요."); }
+}
+
 if (process.argv[1]?.endsWith("gateway.js") || process.argv[1]?.endsWith("gateway.ts")) {
   const config = loadConfig(); let botUserId: string | null = null;
   const wikiConfig = loadWikiConfig();
@@ -45,8 +50,9 @@ if (process.argv[1]?.endsWith("gateway.js") || process.argv[1]?.endsWith("gatewa
     const context = await discoverDiscordContext({ token: config.discordToken, teamChannelId: config.teamChannelId });
     await registerThreadSummaryCommand({ token: config.discordToken, ...context });
     if (wiki) { wiki.sources.botUserId = user.id; await wiki.register(context.applicationId);
-      if (!timer) timer = setInterval(() => { void (async () => { await scheduler?.tick(); await wiki.work(); })().catch(() => console.error("위키 예약 작업을 다음 주기에 다시 확인해요.")); }, 60_000);
-      void (async () => { await scheduler?.tick(); await wiki.work(); })().catch(() => console.error("저장된 위키 작업 복구를 다음 주기에 다시 확인해요."));
+      const run = () => runWikiJobs(() => scheduler!.tick(), () => wiki.work());
+      if (!timer) timer = setInterval(() => { void run(); }, 60_000);
+      void run();
     }
     console.log(`Discord Gateway 연결 완료: ${user.username}`);
   }, onInteraction: async (interaction: any) => {
