@@ -1,0 +1,9 @@
+# Linux host: the bridge listens only on loopback and owns Hermes authentication.
+services:
+  gateway:
+    network_mode: host
+    env_file:
+      - ../.env.hermes
+    environment:
+      THREAD_SUMMARY_PROVIDER: hermes
+      HERMES_SUMMARY_URL: http://127.0.0.1:8646/v1/responses
