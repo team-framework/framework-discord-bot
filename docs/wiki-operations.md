@@ -47,3 +47,5 @@ preview는 실제 대화를 읽고 제안을 생성하지만 Discord에 게시�
 읽기 전용 preview의 JSON 출력에는 모델, 추론 강도, 입력 문자 수, 검색 근거 문자 수와 공급자가 반환한 토큰 사용량이 포함된다. 사용량이 없으면 추정한 값을 채우지 않는다. 제안·승인·거절·stale·published 건수는 SQLite의 proposals 상태로 집계할 수 있다. Discord 원문과 변경안 파일은 공개 분석 자료에 넣지 않는다.
 
 서버의 `deploy/prepare-wiki-preview.py`는 기존 봇과 위키의 인증 설정을 별도 preview 폴더에 복사한다. secret 값은 출력하지 않는다. 이 스크립트는 서비스를 시작하거나 Discord 메시지를 보내지 않는다. preview는 Node24 컨테이너에서 실행하고 App private key를 read-only로 mount한다.
+
+Hermes 배포 overlay는 `WIKI_GITHUB_APP_PRIVATE_KEY_HOST_PATH`의 파일을 `/run/secrets/wiki-app.pem`에 read-only로 mount한다. 컨테이너의 `WIKI_GITHUB_APP_PRIVATE_KEY_PATH`를 그 경로로 설정한다. Compose의 host path 치환에는 `docker compose --env-file ../.env -f compose.yaml -f compose.hermes.yaml`을 사용한다. 기존 `.env`, `.env.hermes`, runtime을 소스 동기화 대상에서 제외하고 서버 안에서 백업한 뒤 필요한 위키 설정만 병합한다.
