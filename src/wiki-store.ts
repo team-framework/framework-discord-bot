@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Proposal, Snapshot } from "./wiki-types.js";
+import type { GenerationUsage } from "./wiki-proposer.js";
 export class ProposalStore {
   readonly db: DatabaseSync;
   constructor(filename: string) {
@@ -13,11 +14,15 @@ export class ProposalStore {
       CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY,leased_until INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY,payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(hash TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'captured');`);
+    this.db.exec("CREATE TABLE IF NOT EXISTS generation_metrics(id TEXT PRIMARY KEY,ts INTEGER NOT NULL,release TEXT NOT NULL,outcome TEXT NOT NULL,message_count INTEGER NOT NULL,latency_ms REAL NOT NULL,facts TEXT NOT NULL)");
     if (!(this.db.prepare("PRAGMA table_info(snapshots)").all() as Array<{name: string}>).some((column) => column.name === "leased_until")) this.db.exec("ALTER TABLE snapshots ADD COLUMN leased_until INTEGER NOT NULL DEFAULT 0");
     if (!(this.db.prepare("PRAGMA table_info(snapshots)").all() as Array<{name: string}>).some((column) => column.name === "generation_token")) this.db.exec("ALTER TABLE snapshots ADD COLUMN generation_token TEXT");
     if (filename !== ":memory:") chmodSync(filename, 0o600);
   }
   close() { this.db.close(); }
+  recordGeneration(outcome: 'proposed' | 'no_update' | 'error', messageCount: number, latencyMs: number, usage: GenerationUsage | null) {
+    this.db.prepare('INSERT INTO generation_metrics VALUES(?,?,?,?,?,?,?)').run(randomUUID(), Date.now(), process.env.WIKI_MEASUREMENT_RELEASE || 'unversioned', outcome, messageCount, latencyMs, JSON.stringify(usage || {}));
+  }
   get(id: string) { const row = this.db.prepare("SELECT payload FROM proposals WHERE id=?").get(id) as { payload: string } | undefined; return row ? JSON.parse(row.payload) as Proposal : null; }
   findSource(hash: string) { const row = this.db.prepare("SELECT payload FROM proposals WHERE source_hash=? AND status NOT IN ('rejected','stale') ORDER BY rowid DESC LIMIT 1").get(hash) as { payload: string } | undefined; return row ? JSON.parse(row.payload) as Proposal : null; }
   put(proposal: Proposal) { this.db.prepare("INSERT INTO proposals VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,hash=excluded.hash,payload=excluded.payload").run(proposal.id, proposal.status, proposal.hash, proposal.snapshot.source_hash, JSON.stringify(proposal)); }

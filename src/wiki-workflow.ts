@@ -1,7 +1,7 @@
 import { discordApiRequest, editInteractionResponse, sendInteractionCallback } from "./discord.js";
 import type { WikiConfig } from "./wiki-config.js";
 import { WikiGitHub } from "./wiki-github.js";
-import { WikiProposer } from "./wiki-proposer.js";
+import { WikiProposer, type GenerationUsage } from "./wiki-proposer.js";
 import { DiscordSources } from "./wiki-snapshot.js";
 import { ProposalStore } from "./wiki-store.js";
 import { digest, proposalHash, StaleProposalError, type Proposal, type Snapshot } from "./wiki-types.js";
@@ -64,12 +64,20 @@ export class WikiWorkflow {
     }
     const generationToken = this.store.acquireGeneration(snapshot.source_hash);
     if (!generationToken) throw new Error("같은 대화 범위의 제안을 만들고 있어요. 잠시 후 다시 확인해 주세요.");
+    const started = performance.now();
+    let usage: GenerationUsage | null = null;
+    let outcome: 'proposed' | 'no_update' | 'error' = 'error';
     try {
-      const generated = await this.proposer.generate(snapshot, finalConclusion, previous);
+      const generated = await this.proposer.generate(snapshot, finalConclusion, previous, (value) => { usage = value; });
       this.store.completeGeneration(snapshot.source_hash, generationToken, generated);
+      outcome = generated ? 'proposed' : 'no_update';
       if (!generated) return null;
       await this.notice(generated); return this.store.get(generated.id)!;
-    } finally { this.store.releaseGeneration(snapshot.source_hash, generationToken); }
+    } finally {
+      try { this.store.recordGeneration(outcome, snapshot.messages.length, performance.now() - started, usage); }
+      catch { console.error('위키 제안 계측 저장에 실패했어요.'); }
+      this.store.releaseGeneration(snapshot.source_hash, generationToken);
+    }
   }
   async handle(interaction: any) {
     const command = interaction.type === 2 && interaction.data?.name === WIKI_PROPOSAL_COMMAND;

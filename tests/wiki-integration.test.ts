@@ -290,3 +290,18 @@ test("an expired generator cannot save over or release the next owner's reservat
   store.releaseGeneration(proposal.snapshot.source_hash, first); assert.equal(store.generationActive(proposal.snapshot.source_hash, later), true);
   store.completeGeneration(proposal.snapshot.source_hash, second, proposal, later); assert.equal(store.list().length, 1); store.close();
 });
+
+test('generation usage records no-update and provider failure separately without source content', async () => {
+  const store = new ProposalStore(':memory:');
+  const workflow = new WikiWorkflow(config(), 'test', store);
+  const snapshot = fixture().snapshot;
+  const usage = {model:'gpt-6-luna',reasoning:'low',input_chars:140,evidence_chars:40,usage:{input_tokens:100,output_tokens:20,cached_tokens:10}};
+  workflow.proposer.generate = async (_snapshot, _conclusion, _previous, callback) => { callback?.(usage); return null; };
+  assert.equal(await workflow.propose(snapshot), null);
+  workflow.proposer.generate = async () => { throw new Error('provider unavailable'); };
+  await assert.rejects(workflow.propose(snapshot));
+  const rows=store.db.prepare('SELECT outcome,facts FROM generation_metrics ORDER BY rowid').all() as Array<{outcome:string;facts:string}>;
+  assert.equal(rows.length,2); assert.equal(rows[0].outcome,'no_update'); assert.equal(rows[1].outcome,'error');
+  assert.deepEqual(JSON.parse(rows[0].facts),usage); assert.deepEqual(JSON.parse(rows[1].facts),{});
+  assert.ok(!JSON.stringify(rows).includes(snapshot.messages[0].content));store.close();
+});
