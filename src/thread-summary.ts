@@ -56,14 +56,43 @@ export function buildThreadTranscript({ messages, botUserId, maxChars = MAX_TRAN
   return `${transcript.slice(0, head)}\n[중간 메시지는 길이 제한으로 생략했어요.]\n${transcript.slice(-(maxChars - head))}`;
 }
 
-export async function summarizeThread({ apiKey, model = "gpt-5-nano", transcript, fetchImpl = fetch }: { apiKey: string | null; model?: string; transcript: string; fetchImpl?: typeof fetch }) {
-  const response = await fetchImpl("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${required(apiKey, "OPENAI_API_KEY")}`, "Content-Type": "application/json" }, body: JSON.stringify({
-    model, store: false, reasoning: /^gpt-5-nano(?:-|$)/.test(model) ? { effort: "minimal" } : undefined,
+export class ThreadSummaryAIError extends Error {
+  constructor(status: number, code: string | null, type: string | null, readonly userMessage: string) {
+    super(`AI 스레드 요약 실패: status=${status}, code=${code || "unknown"}, type=${type || "unknown"}`);
+  }
+}
+
+function aiFailure(status: number, error: any) {
+  // Only retain machine-readable identifiers, never provider messages or request data.
+  const identifier = (value: unknown) => typeof value === "string" && /^[a-z_]{1,80}$/.test(value) ? value : null;
+  const code = identifier(error?.code);
+  const type = identifier(error?.type);
+  let message = "AI 요약 요청에 실패했어요. 봇 관리자에게 문의해 주세요.";
+  if (code === "credit_balance_exhausted") {
+    message = "OpenAI API 크레딧이 소진돼 스레드를 정리하지 못했어요. 봇 관리자가 크레딧을 충전한 뒤 다시 실행해 주세요.";
+  } else if (type === "insufficient_quota" || code === "insufficient_quota" || code === "organization_usage_limit_exceeded") {
+    message = "OpenAI API 사용 한도에 도달했어요. 봇 관리자가 결제와 사용 한도를 확인한 뒤 다시 실행해 주세요.";
+  } else if (status === 429) {
+    message = "AI 요청이 일시적으로 제한됐어요. 잠시 후 다시 실행해 주세요.";
+  } else if (status === 401 || status === 403) {
+    message = "OpenAI API 인증 또는 접근 권한을 확인해야 해요. 봇 관리자에게 문의해 주세요.";
+  }
+  return new ThreadSummaryAIError(status, code, type, message);
+}
+
+export async function summarizeThread({ apiKey, model = "gpt-5-nano", transcript, provider = "openai", hermesUrl = "http://127.0.0.1:8646/v1/responses", hermesKey, fetchImpl = fetch }: { provider?: "openai" | "hermes"; hermesUrl?: string; hermesKey?: string | null; apiKey: string | null; model?: string; transcript: string; fetchImpl?: typeof fetch }) {
+  const response = await fetchImpl(provider === "hermes" ? hermesUrl : "https://api.openai.com/v1/responses", { signal: AbortSignal.timeout(180_000), method: "POST", headers: { Authorization: `Bearer ${provider === "hermes" ? required(hermesKey, "HERMES_SUMMARY_KEY") : required(apiKey, "OPENAI_API_KEY")}`, "Content-Type": "application/json" }, body: JSON.stringify({
+    model: provider === "hermes" ? "gpt-6-luna" : model, store: false, service_tier: provider === "hermes" ? "priority" : undefined, reasoning: provider === "hermes" ? { effort: "low" } : /^gpt-5-nano(?:-|$)/.test(model) ? { effort: "minimal" } : undefined,
     instructions: "당신은 한국어 개발 협업 스레드를 정리하는 도우미예요. 대화에 명시된 사실만 사용하고 추측하지 마세요. 원인이 확정되지 않았다면 확정되지 않았다고 적으세요. three_line_summary의 problem, action, status는 각각 한 줄로 50자 이내로 적으세요. timeline에는 중요한 확인, 시도, 결정만 발생 시각 오름차순으로 적고 time은 한국 시간 MM-DD HH:mm 형식으로 적으세요. 결론에는 결정된 내용, 해결 여부, 남은 다음 작업을 적으세요. 사람 이름이나 계정명은 꼭 필요한 경우가 아니면 제외하세요.",
     input: `다음 Discord 스레드를 정리해 주세요.\n\n${transcript}`, max_output_tokens: 1_200,
     text: { format: { type: "json_schema", name: "thread_summary", strict: true, schema: { type: "object", properties: { three_line_summary: { type: "object", properties: { problem: { type: "string" }, action: { type: "string" }, status: { type: "string" } }, required: ["problem", "action", "status"], additionalProperties: false }, timeline: { type: "array", items: { type: "object", properties: { time: { type: "string" }, event: { type: "string" } }, required: ["time", "event"], additionalProperties: false } }, conclusion: { type: "array", items: { type: "string" } } }, required: ["three_line_summary", "timeline", "conclusion"], additionalProperties: false } } }
   }) });
-  if (!response.ok) throw new Error(`AI 스레드 요약에 실패했어요: ${response.status}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    if (provider === "hermes") throw new ThreadSummaryAIError(response.status, "hermes_summary_failed", null,
+      response.status === 429 ? "Hermes ChatGPT 사용량이 제한됐어요. 잠시 후 다시 실행해 주세요." : "Hermes 요약 호출에 실패했어요. 봇 관리자가 서버의 Hermes 인증과 연결을 확인해 주세요.");
+    throw aiFailure(response.status, body?.error);
+  }
   const result: any = await response.json(); const output = result.output?.flatMap((item: any) => item.content || []).find((content: any) => content.type === "output_text")?.text;
   if (!output) throw new Error("AI가 스레드 요약 결과를 반환하지 않았어요.");
   return JSON.parse(output);
@@ -75,7 +104,7 @@ export function formatThreadSummary({ summary, guildId, threadId, threadName, ow
   return content.length <= MAX_DISCORD_CONTENT ? content : `${content.slice(0, MAX_DISCORD_CONTENT - 20)}\n…(일부 생략했어요.)`;
 }
 
-export async function handleThreadSummaryInteraction({ interaction, token, openAIKey, model, botUserId, fetchImpl = fetch, logger = console }: any) {
+export async function handleThreadSummaryInteraction({ interaction, token, openAIKey, provider, hermesUrl, hermesKey, model, botUserId, fetchImpl = fetch, logger = console }: any) {
   if (interaction.type !== 2 || interaction.data?.name !== THREAD_SUMMARY_COMMAND) return false;
   await sendInteractionCallback({ interactionId: interaction.id, interactionToken: interaction.token, payload: { type: 5, data: { flags: 64 } }, fetchImpl });
   try {
@@ -84,10 +113,10 @@ export async function handleThreadSummaryInteraction({ interaction, token, openA
     const parent: any = await discordApiRequest({ token, path: `/channels/${thread.parent_id}`, fetchImpl });
     if (!MESSAGE_PARENT_TYPES.has(parent.type)) throw new Error("포럼·미디어 게시물은 원본 채널에 답글을 남길 수 없어요.");
     const starter: any = thread.type === PRIVATE_THREAD_TYPE ? null : await discordApiRequest({ token, path: `/channels/${thread.parent_id}/messages/${thread.id}`, fetchImpl });
-    const summary = await summarizeThread({ apiKey: openAIKey, model, transcript: buildThreadTranscript({ messages: await fetchThreadMessages({ token, channelId: thread.id, fetchImpl }), botUserId }), fetchImpl });
+    const summary = await summarizeThread({ apiKey: openAIKey, provider, hermesUrl, hermesKey, model, transcript: buildThreadTranscript({ messages: await fetchThreadMessages({ token, channelId: thread.id, fetchImpl }), botUserId }), fetchImpl });
     const reply = starter && starter.type !== THREAD_CREATED_MESSAGE_TYPE;
     const posted: any = await sendDiscordMessage({ token, channelId: thread.parent_id, payload: { content: formatThreadSummary({ summary, guildId: thread.guild_id, threadId: thread.id, threadName: thread.name, ownerMentionId: reply ? null : thread.owner_id }), ...(reply ? { message_reference: { type: 0, message_id: starter.id, channel_id: thread.parent_id, guild_id: thread.guild_id, fail_if_not_exists: true } } : {}), allowed_mentions: reply ? { parse: [], replied_user: true } : { parse: [], users: thread.owner_id ? [thread.owner_id] : [] } }, fetchImpl });
     await editInteractionResponse({ applicationId: interaction.application_id, interactionToken: interaction.token, content: `원본 채널에 [스레드 정리](https://discord.com/channels/${thread.guild_id}/${thread.parent_id}/${posted.id})를 남겼어요.`, fetchImpl });
-  } catch (error: any) { logger.error(`스레드 정리에 실패했어요: ${error.message}`); await editInteractionResponse({ applicationId: interaction.application_id, interactionToken: interaction.token, content: error.message?.startsWith("이 명령은") || error.message?.startsWith("포럼") ? error.message : "스레드를 정리하지 못했어요. 봇 권한과 AI 설정을 확인해 주세요.", fetchImpl }); }
+  } catch (error: any) { logger.error(`스레드 정리에 실패했어요: ${error.message}`); await editInteractionResponse({ applicationId: interaction.application_id, interactionToken: interaction.token, content: error instanceof ThreadSummaryAIError ? error.userMessage : error.message?.startsWith("이 명령은") || error.message?.startsWith("포럼") ? error.message : "스레드를 정리하지 못했어요. 봇 권한과 AI 설정을 확인해 주세요.", fetchImpl }); }
   return true;
 }

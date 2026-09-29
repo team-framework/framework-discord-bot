@@ -13,6 +13,9 @@ export type Config = {
   prOpenRoleId: string | null;
   statePath: string;
   teamChannelId: string | null;
+  summaryProvider: "openai" | "hermes";
+  hermesSummaryUrl: string;
+  hermesSummaryKey: string | null;
   openAIKey: string | null;
   openAIModel: string;
 };
@@ -71,6 +74,8 @@ function parsePort(value: string | undefined) {
 }
 
 export function loadConfig(env = process.env): Config {
+  const summaryProvider = env.THREAD_SUMMARY_PROVIDER?.trim() || "openai";
+  if (summaryProvider !== "openai" && summaryProvider !== "hermes") throw new Error("THREAD_SUMMARY_PROVIDER는 openai 또는 hermes여야 해요.");
   const repositories = parseRepositories(required(env, "GITHUB_REPOSITORIES"));
   const webhookPath = env.GITHUB_WEBHOOK_PATH?.trim() || "/github/webhooks";
   if (!webhookPath.startsWith("/") || webhookPath.includes("?")) throw new Error("GITHUB_WEBHOOK_PATH는 /로 시작하는 경로여야 해요.");
@@ -87,7 +92,10 @@ export function loadConfig(env = process.env): Config {
     prOpenRoleId: role,
     statePath: env.DELIVERY_STATE_PATH?.trim() || "runtime/deliveries.json",
     teamChannelId: env.DISCORD_TEAM_CHANNEL_ID?.trim() || null,
+    summaryProvider,
+    hermesSummaryUrl: env.HERMES_SUMMARY_URL?.trim() || "http://127.0.0.1:8646/v1/responses",
+    hermesSummaryKey: env.HERMES_SUMMARY_KEY?.trim() || null,
     openAIKey: env.OPENAI_API_KEY?.trim() || null,
-    openAIModel: env.OPENAI_MODEL?.trim() || "gpt-5-nano"
+    openAIModel: summaryProvider === "hermes" ? "gpt-6-luna" : env.OPENAI_MODEL?.trim() || "gpt-5-nano"
   };
 }

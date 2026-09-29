@@ -18,4 +18,8 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile }
     command: node dist/src/gateway.js
     env_file: ../.env
+    environment:
+      WIKI_STATE_PATH: /app/runtime/wiki-proposals.sqlite
+    volumes:
+      - ../runtime:/app/runtime
     restart: on-failure:3

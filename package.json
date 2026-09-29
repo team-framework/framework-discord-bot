@@ -8,6 +8,7 @@
     "start:gateway": "node dist/src/gateway.js",
     "dev": "tsx src/server.ts",
     "dev:gateway": "tsx src/gateway.ts",
+    "wiki:preview": "tsx src/wiki-cli.ts",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

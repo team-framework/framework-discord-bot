@@ -1,0 +1,17 @@
+[Unit]
+Description=Framework thread summaries via Hermes ChatGPT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.hermes/hermes-agent
+EnvironmentFile=%h/apps/framework-discord-bot/.env.hermes
+ExecStart=%h/.hermes/hermes-agent/venv/bin/python %h/apps/framework-discord-bot/deploy/hermes/summary_bridge.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
