@@ -49,3 +49,9 @@ preview는 실제 대화를 읽고 제안을 생성하지만 Discord에 게시�
 서버의 `deploy/prepare-wiki-preview.py`는 기존 봇과 위키의 인증 설정을 별도 preview 폴더에 복사한다. secret 값은 출력하지 않는다. 이 스크립트는 서비스를 시작하거나 Discord 메시지를 보내지 않는다. preview는 Node24 컨테이너에서 실행하고 App private key를 read-only로 mount한다.
 
 Hermes 배포 overlay는 `WIKI_GITHUB_APP_PRIVATE_KEY_HOST_PATH`의 파일을 `/run/secrets/wiki-app.pem`에 read-only로 mount한다. 컨테이너의 `WIKI_GITHUB_APP_PRIVATE_KEY_PATH`를 그 경로로 설정한다. Compose의 host path 치환에는 `docker compose --env-file ../.env -f compose.yaml -f compose.hermes.yaml`을 사용한다. 기존 `.env`, `.env.hermes`, runtime을 소스 동기화 대상에서 제외하고 서버 안에서 백업한 뒤 필요한 위키 설정만 병합한다.
+
+### 2026-09-29 초기 배포 검증
+
+기존 소스·runtime·환경과 Docker 이미지를 서버 안에 백업한 뒤 기존 봇에 위키 기능을 배포했다. 위키 설정과 팀 채널 ID를 병합했고, 기존 알림 환경은 보존했다. Node24 Gateway는 Discord에 연결됐으며 guild 명령 조회에서 `/스레드-정리`, `/위키-제안`을 확인했다. 기존 webhook 서비스는 HTTP 200, Docker health `healthy`로 확인했다.
+
+Gateway를 재시작한 뒤 SQLite의 배포 확인 기록이 유지됐다. 확인 당시 제안·승인 건수는 0건이었고, Discord 메시지 게시나 시험 승인은 실행하지 않았다. 이 단계의 `WIKI_SERVICE_URL`은 내부 preview의 3110 포트, `WIKI_SCHEDULE_ENABLED`는 `false`다. 웹 전환과 정기 수집 활성화는 이후 운영 단계에서 별도로 확인한다.
