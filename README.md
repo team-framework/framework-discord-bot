@@ -1,5 +1,7 @@
 # Framework Discord Bot
 
+위키 논의와 승인 절차는 [봇 사용법](docs/bot-usage.md), 서버 설정은 [위키 제안 운영](docs/wiki-operations.md)을 참고하세요.
+
 GitHub PR 활동만 Discord로 보내는 TypeScript 봇이에요. 기존 `framework-collaboration-harness`의 지연 알림·스레드 요약·동기화 기능과 분리합니다.
 
 ## 전달 이벤트
