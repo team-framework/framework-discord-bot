@@ -305,3 +305,24 @@ test('generation usage records no-update and provider failure separately without
   assert.deepEqual(JSON.parse(rows[0].facts),usage); assert.deepEqual(JSON.parse(rows[1].facts),{});
   assert.ok(!JSON.stringify(rows).includes(snapshot.messages[0].content));store.close();
 });
+
+test('new design, planning and schedule documents use create proposals and await participant approval', async () => {
+  for (const [name,body] of [
+    ['디자인 가이드','# 디자인 가이드\n\n로고 여백은 심볼 높이의 절반으로 합의했다.'],
+    ['제품 기획','# 제품 기획\n\n첫 화면에는 프로젝트 목록을 보여주기로 합의했다.'],
+    ['발표 일정','# 발표 일정\n\n발표 리허설은 2026-10-02 18:00 KST, 담당은 디자인팀으로 합의했다.'],
+  ]) {
+    const cfg=config();const github=new WikiGitHub(cfg);
+    github.head=async()=>({branch:'main',sha:'base'});github.file=async()=>null;
+    const proposer=new WikiProposer(cfg,github,async(url,init)=>{
+      if(String(url).includes('/api/context'))return Response.json({evidence:[]});
+      const request=JSON.parse(String(init?.body));assert.match(request.instructions,/디자인·브랜딩/);assert.match(request.instructions,/create/);
+      return Response.json({answer:JSON.stringify({conclusion:name,no_update:false,changes:[{path:`기획/${name}.md`,operation:'create',content:body,why_new:'동일 주제의 기존 문서가 없다.'}]}),model:'gpt-6-luna',usage:{input_tokens:120,output_tokens:30,input_tokens_details:{cached_tokens:20},output_tokens_details:{reasoning_tokens:5}}});
+    });
+    let usage:any;const proposal=await proposer.generate(fixture().snapshot,undefined,undefined,value=>{usage=value;});
+    assert.equal(proposal?.status,'pending');assert.equal(proposal?.changes[0].before_blob,null);
+    assert.ok(proposal?.changes[0].after_content.includes(body));assert.match(proposal!.changes[0].after_content,/verification: chat-derived/);
+    assert.equal(usage.usage.cached_tokens,20);assert.equal(usage.usage.reasoning_tokens,5);
+    assert.equal(proposal?.approved_by,undefined);
+  }
+});
