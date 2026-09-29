@@ -54,8 +54,9 @@ export class DiscordSources {
     return snapshot;
   }
   async verify(snapshot: Snapshot) {
-    await this.channel(snapshot.channel_id);
     try {
+      // Pagination cannot distinguish a deleted lower-bound message from an oversized range.
+      await this.request(`/channels/${snapshot.channel_id}/messages/${snapshot.from_id}`);
       const current = await this.capture(snapshot.channel_id, { from: snapshot.from_id, to: snapshot.through_id, count: snapshot.messages.length });
       if (current.source_hash !== snapshot.source_hash) throw new StaleProposalError("대화가 수정되었어요. 새 범위로 제안을 다시 만들어 주세요.");
     } catch (error) { if (error instanceof StaleProposalError) throw error;

@@ -56,6 +56,7 @@ test("manual capture fixes the upper bound, rejects oversized ranges, private th
     const endpoint = String(url);
     if (endpoint.endsWith(`/channels/${channel}`)) return Response.json(channelData);
     if (endpoint.includes("?limit=1")) return Response.json([all[2]]);
+    if (endpoint.endsWith(`/messages/${all[0].id}`)) return Response.json(all[0]);
     if (endpoint.endsWith(`/messages/${all[2].id}`)) return Response.json(all[2]);
     if (endpoint.includes("?before=")) return Response.json([...all.slice(0, 2)].reverse().map((item) => edit && item.id === all[1].id ? { ...item, edited_timestamp: "changed" } : item));
     throw new Error("unexpected endpoint");
@@ -66,6 +67,14 @@ test("manual capture fixes the upper bound, rejects oversized ranges, private th
   const privateApi = new DiscordSources("test", config(), async () => Response.json({ ...channelData, type: 12 }));
   await assert.rejects(privateApi.channel(channel), /공개 스레드/);
   assert.throws(() => makeSnapshot(guild, channelData, [message(1, human, { content: "길다".repeat(20_000) })]), /대화가 길어요/);
+});
+
+test("a deleted source boundary becomes stale while transient source failures remain retryable", async () => {
+  const snapshot = fixture().snapshot;
+  const deleted = new DiscordSources("test", config(), async () => Response.json({}, { status: 404 }));
+  await assert.rejects(deleted.verify(snapshot), StaleProposalError);
+  const unavailable = new DiscordSources("test", config(), async () => Response.json({}, { status: 503 }));
+  await assert.rejects(unavailable.verify(snapshot), (error: unknown) => error instanceof Error && !(error instanceof StaleProposalError) && error.message.endsWith("503"));
 });
 
 test("SQLite approval and outbox are atomic, reject duplicate clicks and recover after restart", async () => {
