@@ -17,6 +17,6 @@ try {
     if (proposal && option("--output")) await writeFile(option("--output")!, proposalDocument(proposal), { mode: 0o600 });
     process.stdout.write(JSON.stringify({ mode: process.argv.includes("--post") ? "posted_for_human_approval" : "preview", message_count: snapshot.messages.length,
       proposal: proposal ? { id: proposal.id, hash: proposal.hash, files: proposal.changes.length, status: proposal.status, notice_id: proposal.notice_id ?? null } : null,
-      omissions: snapshot.omissions }) + "\n");
+      omissions: snapshot.omissions, generation: workflow.proposer.lastGeneration }) + "\n");
   }
 } finally { store.close(); }

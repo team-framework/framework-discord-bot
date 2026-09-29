@@ -41,3 +41,9 @@ npm run wiki:preview -- --channel 대상-ID --count 20 --output /tmp/wiki-review
 preview는 실제 대화를 읽고 제안을 생성하지만 Discord에 게시하지 않는다. 원문·diff는 지정한 private 파일에 저장하고 터미널에는 개수·hash·파일 수만 출력한다. 검토를 마친 뒤 `--post`를 붙이면 승인 버튼이 있는 변경안을 올린다. 사람이 승인하면 gateway의 outbox worker가 Draft PR을 만든다. 테스트용 승인자를 사칭하지 않는다.
 
 기존 `/스레드-정리`와 Hermes 대화 gateway를 함께 유지한다. 자연어 응답은 기존 Hermes만 담당하고, 이 gateway는 slash command·제안·승인만 처리한다.
+
+제안 생성은 source hash별 10분 SQLite lease로 중복 실행을 막는다. 안내 메시지를 보내는 동안 승인이나 수정판이 생기면 안내 ID와 상태만 조건부 갱신한다. 이전 네트워크 응답으로 승인 내용이나 새판을 덮어쓰지 않는다. 일일 한도에 도달하기 전에 발견한 채널의 최초 하한을 저장하고, archive 페이지 위치도 다음 실행에 이어 읽는다. 접근할 수 없는 채널은 `blocked:<channel>`에 남기며 cursor를 전진시키지 않는다.
+
+읽기 전용 preview의 JSON 출력에는 모델, 추론 강도, 입력 문자 수, 검색 근거 문자 수와 공급자가 반환한 토큰 사용량이 포함된다. 사용량이 없으면 추정한 값을 채우지 않는다. 제안·승인·거절·stale·published 건수는 SQLite의 proposals 상태로 집계할 수 있다. Discord 원문과 변경안 파일은 공개 분석 자료에 넣지 않는다.
+
+서버의 `deploy/prepare-wiki-preview.py`는 기존 봇과 위키의 인증 설정을 별도 preview 폴더에 복사한다. secret 값은 출력하지 않는다. 이 스크립트는 서비스를 시작하거나 Discord 메시지를 보내지 않는다. preview는 Node24 컨테이너에서 실행하고 App private key를 read-only로 mount한다.
