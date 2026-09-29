@@ -62,12 +62,14 @@ export class WikiWorkflow {
       const existing = this.store.findSource(snapshot.source_hash);
       if (existing) { this.store.snapshotDone(snapshot.source_hash, "proposed"); if (!existing.notice_id) await this.notice(existing); return this.store.get(existing.id)!; }
     }
-    if (!this.store.acquireGeneration(snapshot.source_hash)) throw new Error("같은 대화 범위의 제안을 만들고 있어요. 잠시 후 다시 확인해 주세요.");
+    const generationToken = this.store.acquireGeneration(snapshot.source_hash);
+    if (!generationToken) throw new Error("같은 대화 범위의 제안을 만들고 있어요. 잠시 후 다시 확인해 주세요.");
     try {
       const generated = await this.proposer.generate(snapshot, finalConclusion, previous);
-      if (!generated) { this.store.snapshotDone(snapshot.source_hash, "no_update"); return null; }
-      this.store.put(generated); this.store.snapshotDone(snapshot.source_hash, "proposed"); await this.notice(generated); return this.store.get(generated.id)!;
-    } finally { this.store.releaseGeneration(snapshot.source_hash); }
+      this.store.completeGeneration(snapshot.source_hash, generationToken, generated);
+      if (!generated) return null;
+      await this.notice(generated); return this.store.get(generated.id)!;
+    } finally { this.store.releaseGeneration(snapshot.source_hash, generationToken); }
   }
   async handle(interaction: any) {
     const command = interaction.type === 2 && interaction.data?.name === WIKI_PROPOSAL_COMMAND;
@@ -128,7 +130,7 @@ export class WikiWorkflow {
   async work() {
     if (this.busy) return; this.busy = true;
     try {
-      for (const revision of this.store.list("revising")) if ((revision.revision_started_at ?? 0) + 5 * 60_000 < Date.now()) { revision.status = "pending"; this.store.put(revision); }
+      for (const revision of this.store.list("revising")) if ((revision.revision_started_at ?? 0) + 10 * 60_000 < Date.now() && !this.store.generationActive(revision.snapshot.source_hash)) { revision.status = "pending"; this.store.put(revision); }
       for (const proposal of this.store.list().filter((proposal) => proposal.notice_state !== noticeState(proposal))) await this.notice(proposal).catch(() => {});
       const proposal = this.store.claim();
       if (proposal) {

@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Proposal, Snapshot } from "./wiki-types.js";
@@ -13,6 +14,7 @@ export class ProposalStore {
       CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY,payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(hash TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'captured');`);
     if (!(this.db.prepare("PRAGMA table_info(snapshots)").all() as Array<{name: string}>).some((column) => column.name === "leased_until")) this.db.exec("ALTER TABLE snapshots ADD COLUMN leased_until INTEGER NOT NULL DEFAULT 0");
+    if (!(this.db.prepare("PRAGMA table_info(snapshots)").all() as Array<{name: string}>).some((column) => column.name === "generation_token")) this.db.exec("ALTER TABLE snapshots ADD COLUMN generation_token TEXT");
     if (filename !== ":memory:") chmodSync(filename, 0o600);
   }
   close() { this.db.close(); }
@@ -63,8 +65,17 @@ export class ProposalStore {
       if (cursorKey) this.saveState(cursorKey, snapshot.through_id); this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
-  acquireGeneration(hash: string, now = Date.now()) { return this.db.prepare("UPDATE snapshots SET leased_until=? WHERE hash=? AND leased_until<=?").run(now + 10 * 60_000, hash, now).changes === 1; }
-  releaseGeneration(hash: string) { this.db.prepare("UPDATE snapshots SET leased_until=0 WHERE hash=?").run(hash); }
+  acquireGeneration(hash: string, now = Date.now()) { const token = randomUUID(); return this.db.prepare("UPDATE snapshots SET leased_until=?,generation_token=? WHERE hash=? AND leased_until<=?").run(now + 10 * 60_000, token, hash, now).changes === 1 ? token : null; }
+  generationActive(hash: string, now = Date.now()) { return Boolean(this.db.prepare("SELECT hash FROM snapshots WHERE hash=? AND leased_until>?").get(hash, now)); }
+  releaseGeneration(hash: string, token: string) { this.db.prepare("UPDATE snapshots SET leased_until=0,generation_token=NULL WHERE hash=? AND generation_token=?").run(hash, token); }
+  completeGeneration(hash: string, token: string, proposal: Proposal | null, now = Date.now()) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const owned = this.db.prepare("SELECT hash FROM snapshots WHERE hash=? AND generation_token=? AND leased_until>?").get(hash, token, now);
+      if (!owned) throw new Error("제안 생성 예약이 만료됐어요. 새 결과를 다시 확인해 주세요.");
+      if (proposal) this.put(proposal); this.snapshotDone(hash, proposal ? "proposed" : "no_update"); this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
   pendingSnapshots() { return (this.db.prepare("SELECT payload FROM snapshots WHERE status='captured' AND leased_until<=? ORDER BY rowid LIMIT 10").all(Date.now()) as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as Snapshot); }
   snapshotDone(hash: string, status: string) { this.db.prepare("UPDATE snapshots SET status=? WHERE hash=?").run(status, hash); }
 }

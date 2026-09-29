@@ -280,3 +280,13 @@ test("a disappeared scheduled target leaves its cursor intact and other channels
   assert.equal(store.state(`scan:${channel}`), timeSnowflake(Date.parse("2026-09-28T00:00:00+09:00")));
   assert.equal((store.state<any>(`blocked:${channel}`)).status, 404); assert.equal(store.pendingSnapshots().length, 1); store.close();
 });
+
+test("an expired generator cannot save over or release the next owner's reservation", () => {
+  const store = new ProposalStore(":memory:"); const proposal = fixture(); store.capture(proposal.snapshot);
+  const first = store.acquireGeneration(proposal.snapshot.source_hash, 1)!;
+  const later = 1 + 10 * 60_000; const second = store.acquireGeneration(proposal.snapshot.source_hash, later)!;
+  assert.notEqual(first, second);
+  assert.throws(() => store.completeGeneration(proposal.snapshot.source_hash, first, proposal, later), /예약이 만료/);
+  store.releaseGeneration(proposal.snapshot.source_hash, first); assert.equal(store.generationActive(proposal.snapshot.source_hash, later), true);
+  store.completeGeneration(proposal.snapshot.source_hash, second, proposal, later); assert.equal(store.list().length, 1); store.close();
+});
