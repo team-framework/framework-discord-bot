@@ -19,7 +19,7 @@ Node 24의 내장 SQLite를 사용한다. `runtime` 디렉터리는 gateway 컨�
 
 기본 제한은 snapshot당 300개·직렬화된 출처 24,000자, 하루 3,000개다. 최신 메시지부터 거꾸로 읽는 동안 고정 상한과 페이지 원문을 SQLite buffer에 저장한다. 원래 하한에 도달한 뒤 오래된 메시지부터 snapshot을 생성한다. 캡에 도달하면 `backlog:<channel>` 상태를 남긴다. 읽지 않은 범위를 수집 cursor로 처리하지 않는다.
 
-단일 메시지가 출처 제한보다 크면 `oversized:<channel>:<message>`를 남기고 그 채널의 다음 범위를 보류한다. 사람이 원문을 검토해 짧은 결정 메시지를 남기거나, 출처 제한을 높여 재처리한다. 원문을 자동으로 잘라 사실을 누락시키지 않는다.
+단일 메시지가 출처 제한보다 크면 `oversized:<channel>:<message>`를 남기고 그 채널의 다음 범위를 보류한다. 운영자는 `WIKI_SNAPSHOT_CHARS`를 최대 100,000자 이내에서 높여 원문을 재처리한다. 사람이 별도로 검토한 결정은 새 메시지 범위로 `/위키-제안`을 실행할 수 있다. 새 범위의 제안은 원본 메시지의 예약 backlog를 해소하지 않는다.
 
 scan cursor는 snapshot을 영구 저장한 범위를 의미한다. finalized cursor는 Draft PR을 만든 범위의 마지막 메시지다. 둘 다 wiki main merge나 재색인을 의미하지 않는다. 개별 제안 기록에서 승인·거절·stale·PR 상태를 확인한다.
 
@@ -27,7 +27,7 @@ scan cursor는 snapshot을 영구 저장한 범위를 의미한다. finalized cu
 
 사람이 승인하기 전에 Discord 원본의 작성자·본문·수정 시각·reply·첨부 metadata와 실제 GitHub blob을 다시 읽는다. CDN URL의 갱신용 query signature는 source hash에서 제외한다. 승인자는 snapshot에 있는 사람 작성자이며 현재 guild member여야 한다. guild·channel·원래 안내 메시지·현재 제안 버전을 확인한다.
 
-승인 상태와 PR outbox를 하나의 transaction에 저장한다. 승인 뒤에는 LLM을 호출해 변경 내용을 새로 만들지 않는다. GitHub PR marker와 제안별 고정 브랜치로 결과가 불확실한 요청을 복구한다. 같은 버튼을 다시 누르면 새 PR을 생성하지 않는다. PR 실패는 1분 뒤 재시도하고, 작업 lease는 최대 10분이다. 결론 수정 중 중단된 작업은 5분 뒤 이전 미승인 변경안으로 복구한다.
+승인 상태와 PR outbox를 하나의 transaction에 저장한다. 승인 뒤에는 LLM을 호출해 변경 내용을 새로 만들지 않는다. GitHub PR marker와 제안별 고정 브랜치로 결과가 불확실한 요청을 복구한다. 같은 버튼을 다시 누르면 새 PR을 생성하지 않는다. PR 실패는 1분 뒤 재시도하고, 작업 lease는 최대 10분이다. 결론 수정 중 중단된 작업은 10분이 지나고 활성 생성 lease가 없을 때 이전 미승인 변경안으로 복구한다.
 
 ## 배포 전 확인
 
@@ -55,3 +55,5 @@ Hermes 배포 overlay는 `WIKI_GITHUB_APP_PRIVATE_KEY_HOST_PATH`의 파일을 `/
 기존 소스·runtime·환경과 Docker 이미지를 서버 안에 백업한 뒤 기존 봇에 위키 기능을 배포했다. 위키 설정과 팀 채널 ID를 병합했고, 기존 알림 환경은 보존했다. Node24 Gateway는 Discord에 연결됐으며 guild 명령 조회에서 `/스레드-정리`, `/위키-제안`을 확인했다. 기존 webhook 서비스는 HTTP 200, Docker health `healthy`로 확인했다.
 
 Gateway를 재시작한 뒤 SQLite의 배포 확인 기록이 유지됐다. 확인 당시 제안·승인 건수는 0건이었고, Discord 메시지 게시나 시험 승인은 실행하지 않았다. 이 단계의 `WIKI_SERVICE_URL`은 내부 preview의 3110 포트, `WIKI_SCHEDULE_ENABLED`는 `false`다. 웹 전환과 정기 수집 활성화는 이후 운영 단계에서 별도로 확인한다.
+
+무게시 preview는 branding·global 채널에서 각각 실제 메시지 20건을 읽고 Hermes와 위키 검색을 호출했다. 두 범위 모두 `no_update`로 끝났다. 실제 Discord 대화 응답, 변경안 게시, 참여자 승인, Draft PR 생성까지 이어지는 E2E는 수행하지 않았다. 변경안 생성·승인·PR 복구는 합성 입력과 mocked API 테스트로 검증했다.

@@ -2,7 +2,7 @@
 
 위키 논의와 승인 절차는 [봇 사용법](docs/bot-usage.md), 서버 설정은 [위키 제안 운영](docs/wiki-operations.md)을 참고하세요.
 
-GitHub PR 활동만 Discord로 보내는 TypeScript 봇이에요. 기존 `framework-collaboration-harness`의 지연 알림·스레드 요약·동기화 기능과 분리합니다.
+GitHub PR 알림, 스레드 요약, 참여자 승인을 거친 위키 변경 제안을 처리하는 TypeScript 봇이에요.
 
 ## 전달 이벤트
 
@@ -15,9 +15,9 @@ Issue, 브랜치 생성, push, 라벨, workflow, 배포 등은 구독·전송하
 
 ## `/스레드-정리`
 
-기존 main 구현을 TypeScript로 옮겼어요. Gateway가 `/스레드-정리` 명령을 등록하고, 일반 답글 스레드와 독립 생성 스레드의 최근 500개 메시지를 익명화해 OpenAI Responses API로 정리합니다. 결과는 `3줄 요약 → 시간순 타임라인 → 다음 작업` 형식으로 원본 채널에 남기며, `gpt-5-nano`는 `reasoning.effort: minimal`, `store: false`를 사용합니다.
+Gateway가 `/스레드-정리` 명령을 등록하고, 일반 답글 스레드와 독립 생성 스레드의 최근 500개 메시지를 익명화해 정리합니다. 결과는 `3줄 요약 → 시간순 타임라인 → 다음 작업` 형식으로 원본 채널에 남깁니다. 기본 OpenAI API 구성의 `gpt-5-nano`는 `reasoning.effort: minimal`, `store: false`를 사용합니다. Hermes 구성은 아래 절차에 따라 `gpt-6-luna`를 사용합니다.
 
-## GitHub App 설정
+## PR 알림용 GitHub App 설정
 
 별도 read-only GitHub App을 만들거나 기존 activity App의 webhook을 이 봇으로 옮긴 뒤, 다음만 구독하세요.
 
@@ -26,7 +26,7 @@ Issue, 브랜치 생성, push, 라벨, workflow, 배포 등은 구독·전송하
 - Pull request review comment
 - Issue comment
 
-권한은 Pull requests와 Issues의 Read-only면 충분합니다. webhook URL은 `https://<host>/github/webhooks`이며, `.env`의 `GITHUB_WEBHOOK_SECRET`과 동일한 secret을 사용해야 해요.
+PR 알림용 권한은 Pull requests와 Issues의 Read-only면 충분합니다. webhook URL은 `https://<host>/github/webhooks`이며, `.env`의 `GITHUB_WEBHOOK_SECRET`과 동일한 secret을 사용해야 해요. 위키 Draft PR을 만드는 App은 별도로 [위키 제안 운영](docs/wiki-operations.md)의 제한된 쓰기 권한을 사용합니다.
 
 ## 실행
 
@@ -58,7 +58,7 @@ npm run start:gateway
 4. 아래 명령으로 Gateway를 빌드하고 실행합니다. Hermes 구성에서는 이후 재배포에도 두 Compose 파일을 함께 사용합니다.
 
 ```bash
-docker compose -f deploy/compose.yaml -f deploy/compose.hermes.yaml up -d --build --no-deps gateway
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.hermes.yaml up -d --build --no-deps gateway
 ```
 
 `/healthz`는 브리지 프로세스 상태만 검사합니다. 인증과 모델 사용 가능 여부는 실제 요약 요청으로 검증해야 합니다. 요청이 실패해도 유료 OpenAI API로 자동 전환하지 않습니다.
