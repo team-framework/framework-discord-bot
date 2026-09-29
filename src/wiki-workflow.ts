@@ -30,12 +30,13 @@ export class WikiWorkflow {
   constructor(readonly config: WikiConfig, readonly token: string, readonly store: ProposalStore, readonly fetchImpl = fetch) {
     this.sources = new DiscordSources(token, config, fetchImpl); this.github = new WikiGitHub(config, fetchImpl); this.proposer = new WikiProposer(config, this.github, fetchImpl);
   }
-  async notice(proposal: Proposal) {
+  async notice(proposal: Proposal, retry = 0) {
+    proposal = this.store.get(proposal.id) ?? proposal;
     // Reconcile an uncertain POST after restart using its deterministic component IDs.
     if (!proposal.notice_id) {
       const recent = await this.sources.request(`/channels/${proposal.snapshot.channel_id}/messages?limit=100`) as any[];
       const existing = recent.find((message) => message.components?.some((row: any) => row.components?.some((button: any) => button.custom_id === buttonId("approve", proposal))));
-      if (existing) { proposal.notice_id = existing.id; this.store.put(proposal); }
+      if (existing) proposal = this.store.recordNotice(proposal, existing.id).current;
     }
     const active = proposal.status === "pending";
     const resultLine = proposal.pr_url ? `\n[Draft PR 확인](${proposal.pr_url})` : proposal.reason ? `\n${proposal.reason}` : "";
@@ -51,17 +52,22 @@ export class WikiWorkflow {
     const endpoint = `https://discord.com/api/v10/channels/${proposal.snapshot.channel_id}/messages${proposal.notice_id ? `/${proposal.notice_id}` : ""}`;
     const response = await this.fetchImpl(endpoint, { method: proposal.notice_id ? "PATCH" : "POST", headers: { Authorization: `Bot ${this.token}` }, body: form, signal: AbortSignal.timeout(30_000) });
     if (!response.ok) throw new Error(`위키 제안 안내에 실패했어요 (${response.status}).`);
-    const message = await response.json() as any; proposal.notice_id = message.id; proposal.notice_state = noticeState(proposal); this.store.put(proposal);
+    const message = await response.json() as any;
+    const saved = this.store.recordNotice(proposal, message.id, noticeState(proposal));
+    if (!saved.matches && retry < 1) await this.notice(saved.current, retry + 1);
   }
   async propose(snapshot: Snapshot, finalConclusion?: string, previous?: Proposal) {
     this.store.capture(snapshot);
     if (!previous) {
       const existing = this.store.findSource(snapshot.source_hash);
-      if (existing) { if (!existing.notice_id) await this.notice(existing); return existing; }
+      if (existing) { this.store.snapshotDone(snapshot.source_hash, "proposed"); if (!existing.notice_id) await this.notice(existing); return this.store.get(existing.id)!; }
     }
-    const generated = await this.proposer.generate(snapshot, finalConclusion, previous);
-    if (!generated) { this.store.snapshotDone(snapshot.source_hash, "no_update"); return null; }
-    this.store.put(generated); this.store.snapshotDone(snapshot.source_hash, "proposed"); await this.notice(generated); return generated;
+    if (!this.store.acquireGeneration(snapshot.source_hash)) throw new Error("같은 대화 범위의 제안을 만들고 있어요. 잠시 후 다시 확인해 주세요.");
+    try {
+      const generated = await this.proposer.generate(snapshot, finalConclusion, previous);
+      if (!generated) { this.store.snapshotDone(snapshot.source_hash, "no_update"); return null; }
+      this.store.put(generated); this.store.snapshotDone(snapshot.source_hash, "proposed"); await this.notice(generated); return this.store.get(generated.id)!;
+    } finally { this.store.releaseGeneration(snapshot.source_hash); }
   }
   async handle(interaction: any) {
     const command = interaction.type === 2 && interaction.data?.name === WIKI_PROPOSAL_COMMAND;
@@ -128,8 +134,9 @@ export class WikiWorkflow {
       if (proposal) {
         try {
           if (proposal.hash !== proposalHash(proposal) || proposal.status !== "approved") throw new StaleProposalError("승인한 변경안이 바뀌었어요. 새 제안이 필요해요.");
-          await this.sources.verify(proposal.snapshot);
-          proposal.pr_url = await this.github.publish(proposal); proposal.status = "published"; this.store.finish(proposal);
+          const existing = await this.github.findPublished(proposal);
+          if (!existing) await this.sources.verify(proposal.snapshot);
+          proposal.pr_url = existing ?? await this.github.publish(proposal); proposal.status = "published"; this.store.finish(proposal);
           const finalKey = `finalized:${proposal.snapshot.channel_id}`;
           const prior = this.store.state<string>(finalKey);
           if (!prior || BigInt(prior) < BigInt(proposal.snapshot.through_id)) this.store.saveState(finalKey, proposal.snapshot.through_id);

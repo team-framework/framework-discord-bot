@@ -12,6 +12,7 @@ export class ProposalStore {
       CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY,leased_until INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY,payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(hash TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'captured');`);
+    if (!(this.db.prepare("PRAGMA table_info(snapshots)").all() as Array<{name: string}>).some((column) => column.name === "leased_until")) this.db.exec("ALTER TABLE snapshots ADD COLUMN leased_until INTEGER NOT NULL DEFAULT 0");
     if (filename !== ":memory:") chmodSync(filename, 0o600);
   }
   close() { this.db.close(); }
@@ -19,6 +20,17 @@ export class ProposalStore {
   findSource(hash: string) { const row = this.db.prepare("SELECT payload FROM proposals WHERE source_hash=? AND status NOT IN ('rejected','stale') ORDER BY rowid DESC LIMIT 1").get(hash) as { payload: string } | undefined; return row ? JSON.parse(row.payload) as Proposal : null; }
   put(proposal: Proposal) { this.db.prepare("INSERT INTO proposals VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,hash=excluded.hash,payload=excluded.payload").run(proposal.id, proposal.status, proposal.hash, proposal.snapshot.source_hash, JSON.stringify(proposal)); }
   list(status?: string) { const rows = status ? this.db.prepare("SELECT payload FROM proposals WHERE status=?").all(status) : this.db.prepare("SELECT payload FROM proposals").all(); return (rows as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as Proposal); }
+  recordNotice(expected: Proposal, noticeId: string, state?: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.get(expected.id); if (!current) throw new Error("제안을 찾지 못했어요.");
+      const matches = current.hash === expected.hash && current.version === expected.version && current.status === expected.status;
+      current.notice_id ??= noticeId;
+      if (matches && current.notice_id === noticeId && state) current.notice_state = state;
+      else if (!matches) current.notice_state = undefined;
+      this.put(current); this.db.exec("COMMIT"); return { current, matches };
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
   transition(id: string, hash: string, status: "rejected" | "revising") {
     this.db.exec("BEGIN IMMEDIATE");
     try { const proposal = this.get(id); if (!proposal || proposal.hash !== hash || proposal.status !== "pending") throw new Error("제안이 바뀌었거나 이미 처리됐어요."); proposal.status = status;
@@ -51,6 +63,8 @@ export class ProposalStore {
       if (cursorKey) this.saveState(cursorKey, snapshot.through_id); this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
-  pendingSnapshots() { return (this.db.prepare("SELECT payload FROM snapshots WHERE status='captured' ORDER BY rowid LIMIT 10").all() as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as Snapshot); }
+  acquireGeneration(hash: string, now = Date.now()) { return this.db.prepare("UPDATE snapshots SET leased_until=? WHERE hash=? AND leased_until<=?").run(now + 10 * 60_000, hash, now).changes === 1; }
+  releaseGeneration(hash: string) { this.db.prepare("UPDATE snapshots SET leased_until=0 WHERE hash=?").run(hash); }
+  pendingSnapshots() { return (this.db.prepare("SELECT payload FROM snapshots WHERE status='captured' AND leased_until<=? ORDER BY rowid LIMIT 10").all(Date.now()) as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as Snapshot); }
   snapshotDone(hash: string, status: string) { this.db.prepare("UPDATE snapshots SET status=? WHERE hash=?").run(status, hash); }
 }

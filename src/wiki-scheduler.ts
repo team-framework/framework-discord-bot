@@ -17,19 +17,22 @@ export class WikiScheduler {
     const targets = new Map<string, any>(parents.filter((channel) => [0, 5].includes(channel.type)).map((channel) => [channel.id, channel]));
     const active = await this.sources.request(`/guilds/${this.config.guildId}/threads/active`) as any;
     for (const thread of active.threads || []) if ([10, 11].includes(thread.type) && allowed.has(thread.parent_id)) targets.set(thread.id, thread);
+    for (const known of this.store.state<any[]>("scheduled-targets") || []) if (allowed.has(known.parent_id)) targets.set(known.id, targets.get(known.id) || known);
     for (const parent of parents) {
-      let before = "";
+      const archiveKey = `archive-before:${parent.id}`;
+      let before = this.store.state<string>(archiveKey) || "";
       for (let pages = 0; pages < 10; pages++) {
         const result = await this.sources.request(`/channels/${parent.id}/threads/archived/public?limit=100${before ? `&before=${encodeURIComponent(before)}` : ""}`) as any;
         for (const thread of result.threads || []) if ([10, 11].includes(thread.type)) targets.set(thread.id, thread);
-        if (!result.has_more) break;
+        this.store.saveState("scheduled-targets", [...targets.values()]);
+        if (!result.has_more) { this.store.saveState(archiveKey, null); this.store.saveState(`discovery-backlog:${parent.id}`, false); break; }
         before = result.threads?.at(-1)?.thread_metadata?.archive_timestamp;
         if (!before) throw new Error("공개 스레드의 이어 읽기 정보를 확인하지 못했어요.");
+        this.store.saveState(archiveKey, before);
         if (pages === 9) this.store.saveState(`discovery-backlog:${parent.id}`, true);
       }
     }
     // Previously discovered public threads remain eligible even after being archived.
-    for (const known of this.store.state<any[]>("scheduled-targets") || []) if (allowed.has(known.parent_id)) targets.set(known.id, targets.get(known.id) || known);
     const result = [...targets.values()]; this.store.saveState("scheduled-targets", result); return result;
   }
   async tick(now = Date.now()) {
@@ -39,9 +42,14 @@ export class WikiScheduler {
     this.running = true;
     try {
       const boundary = Date.parse(`${day}T00:00:00+09:00`);
+      const initialLower = this.store.state<string>("schedule-initial-lower") || timeSnowflake(boundary - 24 * 3_600_000);
+      this.store.saveState("schedule-initial-lower", initialLower);
       let captured = 0; let pagesLeft = 200;
-      for (const target of await this.discover()) {
+      const targets = await this.discover();
+      for (const target of targets) if (!this.store.state(`scan:${target.id}`)) this.store.saveState(`scan:${target.id}`, initialLower);
+      for (const target of targets) {
         if (captured >= this.config.dailyMessages || pagesLeft <= 0) break;
+        try {
         const cursorKey = `scan:${target.id}`; const bufferKey = `buffer:${target.id}`;
         const cursor = this.store.state<string>(cursorKey) || timeSnowflake(boundary - 24 * 3_600_000);
         let buffer = this.store.state<ScanBuffer>(bufferKey);
@@ -91,6 +99,11 @@ export class WikiScheduler {
         }
         if (!buffer.messages.length) { this.store.saveState(bufferKey, null); this.store.saveState(`backlog:${target.id}`, false); }
         else this.store.saveState(`backlog:${target.id}`, true);
+        this.store.saveState(`blocked:${target.id}`, false);
+        } catch (error) {
+          if (error instanceof Error && /(?:403|404)$/.test(error.message)) this.store.saveState(`blocked:${target.id}`, { status: Number(error.message.slice(-3)), at: new Date(now).toISOString() });
+          else throw error;
+        }
       }
       this.store.saveState("scheduled-day", day); this.store.saveState("scheduled-last-run", { at: new Date(now).toISOString(), captured_messages: captured, remaining_page_budget: pagesLeft });
     } finally { this.running = false; }

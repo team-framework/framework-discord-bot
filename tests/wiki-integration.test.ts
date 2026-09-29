@@ -102,7 +102,7 @@ test("GitHub publication is a deterministic Draft PR and recovers an uncertain s
   const proposal = fixture(); let created: any = null; let branch: any = null; let posts = 0;
   const github = new WikiGitHub(config(), async (url, init) => {
     const endpoint = new URL(String(url)); const route = endpoint.pathname; const body = init?.body ? JSON.parse(String(init.body)) : null;
-    if (route.endsWith("/pulls") && init?.method === "POST") { posts++; assert.equal(body.draft, true); assert.match(body.head, /\/#73$/); assert.ok(!body.body.includes("Closes")); created = { html_url: "https://github.com/team-framework/framework-llm-wiki/pull/99", body: body.body }; throw new Error("connection lost after delivery"); }
+    if (route.endsWith("/pulls") && init?.method === "POST") { posts++; assert.equal(body.draft, true); assert.match(body.head, /\/#73$/); assert.ok(!body.body.includes("Closes")); created = { html_url: "https://github.com/team-framework/framework-llm-wiki/pull/99", body: body.body, head: { sha: "branch-commit" } }; throw new Error("connection lost after delivery"); }
     if (route.endsWith("/pulls")) return Response.json(created ? [created] : []);
     if (route.endsWith("/framework-llm-wiki")) return Response.json({ default_branch: "main" });
     if (route.includes("/git/ref/heads/main")) return Response.json({ object: { sha: "base" } });
@@ -182,6 +182,101 @@ test("an approved durable proposal publishes the exact approved bytes without re
   const workflow = new WikiWorkflow(config(), "test", store, async () => { throw new Error("no provider call allowed"); });
   workflow.notice = async () => {};
   workflow.sources.verify = async () => {};
+  workflow.github.findPublished = async () => null;
   workflow.github.publish = async (approved) => { assert.equal(approved.hash, proposal.hash); assert.equal(approved.changes[0].after_content, proposal.changes[0].after_content); return "https://github.com/team-framework/framework-llm-wiki/pull/99"; };
   await workflow.work(); assert.equal(store.get(proposal.id)?.status, "published"); assert.equal(store.claim(), null); store.close();
+});
+
+test("delayed notice responses preserve concurrent approval and replacement versions", async () => {
+  for (const action of ["approve", "revision"]) {
+    const store = new ProposalStore(":memory:"); const proposal = fixture(); store.put(proposal);
+    let release!: () => void; let started!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; }); const arrived = new Promise<void>((resolve) => { started = resolve; });
+    let requests = 0;
+    const workflow = new WikiWorkflow(config(), "test", store, async () => { if (++requests === 1) { started(); await barrier; } return Response.json({ id: "notice" }); });
+    const pending = workflow.notice(proposal); await arrived;
+    if (action === "approve") store.approve(proposal.id, proposal.hash, human);
+    else { const revised = { ...proposal, version: 2, conclusion: "새 결론" }; revised.hash = proposalHash(revised); store.put(revised); }
+    release(); await pending;
+    const current = store.get(proposal.id)!;
+    if (action === "approve") { assert.equal(current.status, "approved"); assert.equal(current.approved_by, human); assert.equal(store.claim()?.id, proposal.id); }
+    else { assert.equal(current.version, 2); assert.equal(current.conclusion, "새 결론"); assert.notEqual(current.hash, proposal.hash); }
+    assert.equal(requests, 2); store.close();
+  }
+});
+
+test("simultaneous generation of one source snapshot reserves one durable proposal", async () => {
+  const store = new ProposalStore(":memory:"); const proposal = fixture(); const workflow = new WikiWorkflow(config(), "test", store);
+  let release!: () => void; let started!: () => void; let generations = 0;
+  const barrier = new Promise<void>((resolve) => { release = resolve; }); const arrived = new Promise<void>((resolve) => { started = resolve; });
+  workflow.proposer.generate = async () => { generations++; started(); await barrier; return proposal; }; workflow.notice = async () => {};
+  const first = workflow.propose(proposal.snapshot); await arrived;
+  await assert.rejects(workflow.propose(proposal.snapshot), /만들고 있어요/);
+  assert.equal(store.pendingSnapshots().length, 0); release(); await first;
+  assert.equal((await workflow.propose(proposal.snapshot))?.id, proposal.id); assert.equal(generations, 1); assert.equal(store.list().length, 1); store.close();
+});
+
+test("daily global caps preserve the first lower bound of an unvisited channel", async () => {
+  const secondChannel = "123456789012345699";
+  const cfg = { ...config(), scheduleEnabled: true, dailyMessages: 1 };
+  const store = new ProposalStore(":memory:"); const now = Date.parse("2026-09-29T00:01:00+09:00");
+  const old = String(BigInt(timeSnowflake(Date.parse("2026-09-28T01:00:00+09:00"))) + 1n);
+  const sources = new DiscordSources("test", cfg, async (url) => {
+    const endpoint = String(url);
+    if (endpoint.endsWith("/channels")) return Response.json([channelData, { ...channelData, id: secondChannel }]);
+    if (endpoint.includes("threads/")) return Response.json({ threads: [], has_more: false });
+    if (new URL(endpoint).searchParams.get("limit") === "1") return Response.json([{ ...message(1), id: old }]);
+    return Response.json([]);
+  });
+  const scheduler = new WikiScheduler(cfg, sources, store); await scheduler.tick(now);
+  assert.equal(store.pendingSnapshots().length, 1);
+  const initial = timeSnowflake(Date.parse("2026-09-28T00:00:00+09:00")); assert.equal(store.state(`scan:${secondChannel}`), initial);
+  await scheduler.tick(now + 24 * 3_600_000);
+  assert.equal(store.pendingSnapshots().length, 2); assert.equal(store.state(`scan:${secondChannel}`), old); store.close();
+});
+
+test("archived thread discovery resumes beyond its page cap", async () => {
+  const store = new ProposalStore(":memory:"); let page = 0; const offsets: string[] = [];
+  const sources = new DiscordSources("test", config(), async (url) => {
+    const endpoint = String(url);
+    if (endpoint.endsWith("/channels")) return Response.json([channelData]);
+    if (endpoint.includes("threads/active")) return Response.json({ threads: [] });
+    offsets.push(new URL(endpoint).searchParams.get("before") || ""); page++;
+    return Response.json({ threads: [{ ...channelData, id: String(223456789012345000n + BigInt(page)), type: 11, parent_id: channel, thread_metadata: { archive_timestamp: `2026-09-${String(29 - page).padStart(2, "0")}T00:00:00Z` } }], has_more: page < 11 });
+  });
+  const scheduler = new WikiScheduler(config(), sources, store); await scheduler.discover(); assert.equal(page, 10);
+  const next = store.state<string>(`archive-before:${channel}`); assert.ok(next);
+  const targets = await scheduler.discover(); assert.equal(offsets[10], next); assert.equal(page, 11); assert.equal(targets.length, 12); assert.equal(store.state(`discovery-backlog:${channel}`), false); store.close();
+});
+
+test("a matching PR marker with changed approved file bytes cannot recover as published", async () => {
+  const proposal = fixture();
+  const github = new WikiGitHub(config(), async (url) => String(url).includes("/pulls?")
+    ? Response.json([{ body: `<!-- framework-wiki-proposal:${proposal.id}:${proposal.hash} -->`, html_url: "https://github.com/team-framework/framework-llm-wiki/pull/99", head: { sha: "tampered-head" } }])
+    : Response.json({ type: "file", encoding: "base64", sha: "tampered", content: Buffer.from("modified after approval").toString("base64") }));
+  await assert.rejects(github.findPublished(proposal), StaleProposalError);
+});
+
+test("an already delivered PR recovers after a source edit without publishing again", async () => {
+  const store = new ProposalStore(":memory:"); const proposal = fixture(); store.put(proposal); store.approve(proposal.id, proposal.hash, human);
+  const workflow = new WikiWorkflow(config(), "test", store); workflow.notice = async () => {};
+  workflow.github.findPublished = async () => "https://github.com/team-framework/framework-llm-wiki/pull/99";
+  workflow.sources.verify = async () => { throw new StaleProposalError("edited after actual PR delivery"); };
+  workflow.github.publish = async () => { throw new Error("cannot post again"); };
+  await workflow.work(); assert.equal(store.get(proposal.id)?.status, "published"); assert.equal(store.claim(), null); store.close();
+});
+
+test("a disappeared scheduled target leaves its cursor intact and other channels continue", async () => {
+  const second = { ...channelData, id: "123456789012345699" }; const cfg = { ...config(), scheduleEnabled: true };
+  const store = new ProposalStore(":memory:"); const now = Date.parse("2026-09-29T00:01:00+09:00");
+  const old = String(BigInt(timeSnowflake(Date.parse("2026-09-28T01:00:00+09:00"))) + 1n);
+  const sources = new DiscordSources("test", cfg, async (url) => {
+    const endpoint = String(url); if (endpoint.endsWith("/channels")) return Response.json([channelData, second]);
+    if (endpoint.includes("threads/")) return Response.json({ threads: [], has_more: false });
+    if (endpoint.includes(`/channels/${channel}/messages`)) return Response.json({}, { status: 404 });
+    return Response.json(new URL(endpoint).searchParams.get("limit") === "1" ? [{ ...message(1), id: old }] : []);
+  });
+  await new WikiScheduler(cfg, sources, store).tick(now);
+  assert.equal(store.state(`scan:${channel}`), timeSnowflake(Date.parse("2026-09-28T00:00:00+09:00")));
+  assert.equal((store.state<any>(`blocked:${channel}`)).status, 404); assert.equal(store.pendingSnapshots().length, 1); store.close();
 });

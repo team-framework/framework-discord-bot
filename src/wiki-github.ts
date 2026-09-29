@@ -53,14 +53,25 @@ export class WikiGitHub {
     }
     return head;
   }
-  async publish(proposal: Proposal) {
+  async findPublished(proposal: Proposal) {
     if (!this.config.trackingIssue) throw new Error("WIKI_TRACKING_ISSUE 설정이 필요해요.");
     const headBranch = `feat/discord-wiki-${proposal.id}/#${this.config.trackingIssue}`;
     const marker = `<!-- framework-wiki-proposal:${proposal.id}:${proposal.hash} -->`;
     const repo = `/repos/${this.config.repository}`; const owner = this.config.repository.split("/")[0];
     const pulls = await this.request(`${repo}/pulls?state=all&head=${encodeURIComponent(`${owner}:${headBranch}`)}&per_page=100`);
     const existing = pulls.find((pull: any) => pull.body?.includes(marker));
-    if (existing) return existing.html_url as string;
+    if (!existing) return null;
+    for (const change of proposal.changes) {
+      const current = await this.file(change.path, existing.head.sha);
+      if (!current || digest(current.content) !== change.after_hash) throw new StaleProposalError("기존 PR의 승인된 변경 내용이 바뀌었어요. 관리자 확인이 필요해요.");
+    }
+    return existing.html_url as string;
+  }
+  async publish(proposal: Proposal) {
+    const existing = await this.findPublished(proposal); if (existing) return existing;
+    const headBranch = `feat/discord-wiki-${proposal.id}/#${this.config.trackingIssue}`;
+    const marker = `<!-- framework-wiki-proposal:${proposal.id}:${proposal.hash} -->`;
+    const repo = `/repos/${this.config.repository}`;
     const head = await this.verify(proposal);
     let branchRef: any = null;
     try { branchRef = await this.request(`${repo}/git/ref/heads/${encodeURIComponent(headBranch)}`); }
