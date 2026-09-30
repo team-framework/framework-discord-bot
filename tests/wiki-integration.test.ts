@@ -136,7 +136,7 @@ test("proposal generation uses bounded source evidence and precise replacements,
   const proposer = new WikiProposer(config(), github, async (url, init) => {
     if (String(url).includes("/api/context")) return Response.json({ evidence: [{ path: "결정.md", content: oldText }] });
     if (String(url).includes("/api/note")) return Response.json({ note_hash: digest(original) });
-    const body = JSON.parse(String(init?.body)); assert.equal(body.reasoning, "low"); assert.ok(body.instructions.includes("데이터"));
+    const body = JSON.parse(String(init?.body)); assert.equal(body.reasoning, "max"); assert.ok(body.instructions.includes("데이터"));
     return Response.json({ answer: JSON.stringify({ conclusion: "새 결정이다.", uncertainties: [], changes: [{ path: "결정.md", operation: "replace", old_text: oldText, new_text: "## 승인\n새 결정이다.\n" }] }) });
   });
   const proposal = await proposer.generate(fixture().snapshot); assert.ok(proposal);
@@ -295,7 +295,7 @@ test('generation usage records no-update and provider failure separately without
   const store = new ProposalStore(':memory:');
   const workflow = new WikiWorkflow(config(), 'test', store);
   const snapshot = fixture().snapshot;
-  const usage = {model:'gpt-6-luna',reasoning:'low',input_chars:140,evidence_chars:40,usage:{input_tokens:100,output_tokens:20,cached_tokens:10}};
+  const usage = {model:'gpt-6-luna',reasoning:'max',input_chars:140,evidence_chars:40,usage:{input_tokens:100,output_tokens:20,cached_tokens:10}};
   workflow.proposer.generate = async (_snapshot, _conclusion, _previous, callback) => { callback?.(usage); return null; };
   assert.equal(await workflow.propose(snapshot), null);
   workflow.proposer.generate = async () => { throw new Error('provider unavailable'); };
@@ -322,7 +322,7 @@ test('new design, planning and schedule documents use create proposals and await
     let usage:any;const proposal=await proposer.generate(fixture().snapshot,undefined,undefined,value=>{usage=value;});
     assert.equal(proposal?.status,'pending');assert.equal(proposal?.changes[0].before_blob,null);
     assert.ok(proposal?.changes[0].after_content.includes(body));assert.match(proposal!.changes[0].after_content,/verification: chat-derived/);
-    assert.equal(usage.usage.cached_tokens,20);assert.equal(usage.usage.reasoning_tokens,5);
+    assert.equal(usage.reasoning,'max');assert.equal(usage.usage.cached_tokens,20);assert.equal(usage.usage.reasoning_tokens,5);
     assert.equal(proposal?.approved_by,undefined);
   }
 });

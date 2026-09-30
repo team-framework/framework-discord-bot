@@ -5,7 +5,7 @@ Node 24의 내장 SQLite를 사용한다. `runtime` 디렉터리는 gateway 컨�
 ## 인증 연결
 
 - `WIKI_SERVICE_URL`·`WIKI_SERVICE_KEY`: 위키 서버의 읽기 전용 `/api/context`, `/api/note` API. `Authorization: Bearer` 헤더를 사용한다.
-- `HERMES_WIKI_URL`·`HERMES_WIKI_KEY`: 사설 요약/제안 API. 서버의 `openai-codex` OAuth와 `gpt-6-luna`, `low`를 사용한다. 봇에 OAuth 토큰을 복사하지 않는다.
+- `HERMES_WIKI_URL`·`HERMES_WIKI_KEY`: 사설 요약/제안 API. 서버의 `openai-codex` OAuth와 `gpt-6-luna`, `max`를 사용한다. 봇에 OAuth 토큰을 복사하지 않는다.
 - `WIKI_GITHUB_APP_CLIENT_ID`·`WIKI_GITHUB_APP_PRIVATE_KEY_PATH`: wiki 저장소에 설치된 App. Contents write와 Pull requests write만 요청한다. PEM은 읽기 전용으로 마운트한다.
 - `WIKI_TRACKING_ISSUE`: 미리 만든 지속 추적 이슈. 현재 wiki#73이다. 생성 브랜치는 `feat/discord-wiki-<proposal-id>/#73`, PR은 Draft다. PR 본문은 `Refs #73`을 쓰므로 지속 이슈를 닫지 않는다.
 

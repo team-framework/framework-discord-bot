@@ -55,7 +55,7 @@ test("정상 AI 응답은 요약 객체로 반환해요", async () => {
   assert.deepEqual(await summarizeThread({ apiKey: "test", transcript: "test", fetchImpl: async () => Response.json({ output: [{ content: [{ type: "output_text", text: JSON.stringify(summary) }] }] }) }), summary);
 });
 
-test("Hermes는 API 키 없이 Luna 6 low priority로 내부 서비스만 호출해요", async () => {
+test("Hermes는 API 키 없이 Luna 6 max priority로 내부 서비스만 호출해요", async () => {
   let called = false;
   await summarizeThread({ apiKey: null, transcript: "테스트", provider: "hermes", hermesKey: "bridge-secret", model: "gpt-5-nano", fetchImpl: async (url, init) => {
     called = true;
@@ -63,8 +63,9 @@ test("Hermes는 API 키 없이 Luna 6 low priority로 내부 서비스만 호출
     assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer bridge-secret");
     const body = JSON.parse(String(init?.body));
     assert.equal(body.model, "gpt-6-luna");
-    assert.deepEqual(body.reasoning, { effort: "low" });
+    assert.deepEqual(body.reasoning, { effort: "max" });
     assert.equal(body.service_tier, "priority");
+    assert.equal(body.max_output_tokens, 4_000);
     return Response.json({ output: [{ content: [{ type: "output_text", text: '{"three_line_summary":{},"timeline":[],"conclusion":[]}' }] }] });
   } });
   assert.equal(called, true);
