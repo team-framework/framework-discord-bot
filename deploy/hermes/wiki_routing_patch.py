@@ -2,10 +2,10 @@
 from pathlib import Path
 import sys
 
-MARKER = '    def _framework_is_wiki_update(self, message):'
+MARKER = '    async def _framework_is_wiki_update(self, message):'
 ANCHOR = '        # Save stripped text now: create_thread() can clobber message.content (breaks /command detection).\n'
-GATE = '        if self._framework_is_wiki_update(message):\n            return False\n'
-HELPER = '''    def _framework_is_wiki_update(self, message):
+GATE = '        if await self._framework_is_wiki_update(message):\n            return False\n'
+HELPER = '''    async def _framework_is_wiki_update(self, message):
         import os
         import re
         if os.getenv("FRAMEWORK_WIKI_MENTION_ROUTING") != "true":
@@ -33,13 +33,17 @@ HELPER = '''    def _framework_is_wiki_update(self, message):
         kind = getattr(getattr(channel, "type", None), "value", None)
         if kind not in (0, 5, 10, 11):
             return False
-        parent = getattr(channel, "parent", None) if kind in (10, 11) else channel
-        if not parent:
-            return False
         ids = lambda key: set(filter(None, (part.strip() for part in os.getenv(key, "").split(","))))
-        return (str(parent.id) in ids("WIKI_DISCORD_CHANNEL_IDS")
-                or str(parent.id) in ids("WIKI_DISCORD_FORUM_IDS")
-                or str(getattr(parent, "category_id", None)) in ids("WIKI_DISCORD_CATEGORY_IDS"))
+        parent = getattr(channel, "parent", None) if kind in (10, 11) else channel
+        parent_id = getattr(channel, "parent_id", None) if kind in (10, 11) else channel.id
+        if str(parent_id) in ids("WIKI_DISCORD_CHANNEL_IDS") or str(parent_id) in ids("WIKI_DISCORD_FORUM_IDS"):
+            return True
+        if not parent and parent_id:
+            try:
+                parent = await self._client.fetch_channel(parent_id)
+            except Exception:
+                return False
+        return bool(parent and str(getattr(parent, "category_id", None)) in ids("WIKI_DISCORD_CATEGORY_IDS"))
 
 '''
 

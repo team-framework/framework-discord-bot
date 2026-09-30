@@ -1,11 +1,12 @@
 """Offline checks for private runtime migration and cross-Gateway routing."""
+import asyncio
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import yaml
 from configure_wiki_runtime import configure
 from wiki_routing_patch import HELPER, ANCHOR, GATE, patched
@@ -67,6 +68,9 @@ class RoutingTests(unittest.TestCase):
         self.adapter._client = NS(user=self.own)
         self.scope = {'FRAMEWORK_WIKI_MENTION_ROUTING': 'true', 'WIKI_DISCORD_GUILD_ID': '10', 'WIKI_DISCORD_CATEGORY_IDS': '20'}
 
+    def check(self, message):
+        return asyncio.run(self.adapter._framework_is_wiki_update(message))
+
     def message(self, content, mentioned=True):
         return NS(author=NS(bot=False), webhook_id=None, guild=NS(id=10), content=content,
                   mentions=[self.own] if mentioned else [], channel=NS(id=30, type=NS(value=0), category_id=20))
@@ -75,18 +79,31 @@ class RoutingTests(unittest.TestCase):
         with patch.dict(os.environ, self.scope, clear=True):
             for case in self.fixture['cases']:
                 with self.subTest(case=case['name']):
-                    self.assertEqual(self.adapter._framework_is_wiki_update(self.message(case['content'], case['mentioned'])), case['expected'])
+                    self.assertEqual(self.check(self.message(case['content'], case['mentioned'])), case['expected'])
 
     def test_scope_and_human_boundaries(self):
         content = '<@' + str(self.own.id) + '> 이거로 위키 갱신해.'
         with patch.dict(os.environ, self.scope, clear=True):
             for field, value in [('webhook_id', 1), ('author', NS(bot=True)), ('guild', NS(id=99)), ('channel', NS(id=30, type=NS(value=0), category_id=99)), ('channel', NS(id=30, type=NS(value=12), category_id=20))]:
                 msg = self.message(content); setattr(msg, field, value)
-                self.assertFalse(self.adapter._framework_is_wiki_update(msg))
+                self.assertFalse(self.check(msg))
             msg = self.message(content); msg.channel = NS(id=40, type=NS(value=11), parent=msg.channel)
-            self.assertTrue(self.adapter._framework_is_wiki_update(msg))
+            self.assertTrue(self.check(msg))
         with patch.dict(os.environ, {}, clear=True):
-            self.assertFalse(self.adapter._framework_is_wiki_update(self.message(content)))
+            self.assertFalse(self.check(self.message(content)))
+
+    def test_uncached_thread_parent_uses_id_or_fetch(self):
+        content = '<@' + str(self.own.id) + '> 위키 갱신해'
+        msg = self.message(content)
+        msg.channel = NS(id=40, type=NS(value=11), parent=None, parent_id=30)
+        self.adapter._client.fetch_channel = AsyncMock(return_value=NS(id=30, category_id=20))
+        with patch.dict(os.environ, self.scope, clear=True):
+            self.assertTrue(self.check(msg))
+        self.adapter._client.fetch_channel.assert_awaited_once_with(30)
+        self.adapter._client.fetch_channel.reset_mock()
+        with patch.dict(os.environ, {**self.scope, 'WIKI_DISCORD_FORUM_IDS': '30'}, clear=True):
+            self.assertTrue(self.check(msg))
+        self.adapter._client.fetch_channel.assert_not_awaited()
 
     def test_patch_idempotent_and_upstream_drift_rejected(self):
         original = 'class Adapter:\n    async def _handle_message(\n        self, message\n    ):\n' + ANCHOR + '        return True\n'
