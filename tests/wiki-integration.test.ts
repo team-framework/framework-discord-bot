@@ -239,6 +239,85 @@ test("proposal generation uses bounded source evidence and precise replacements,
   assert.ok(proposal.changes[0].after_content.includes("chat-derived")); assert.equal(proposal.hash, proposalHash(proposal));
 });
 
+test("a mid-line old_text retries once with the same evidence and records both model calls", async () => {
+  const original = "# 원문\n\n## 승인\n이전 결정이다.\n\n## 다음\n유지한다.\n";
+  const oldText = "## 승인\n이전 결정이다.\n";
+  const context = { evidence: [{ path: "결정.md", content: oldText }] };
+  const github = { head: async () => ({ sha: "base", branch: "main" }), file: async () => ({ sha: "blob", content: original }) } as any;
+  const requests: any[] = []; const measurements: any[] = [];
+  const proposer = new WikiProposer(config(), github, async (url, init) => {
+    if (String(url).includes("/api/context")) return Response.json(context);
+    if (String(url).includes("/api/note")) return Response.json({ note_hash: digest(original) });
+    const request = JSON.parse(String(init?.body)); requests.push(request);
+    const selected = requests.length === 1 ? "승인\n이전 결정이다." : oldText;
+    return Response.json({ model: "gpt-6-luna", usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120,
+      input_tokens_details: { cached_tokens: 10 }, output_tokens_details: { reasoning_tokens: 8 } },
+      answer: JSON.stringify({ conclusion: "새 결정이다.", changes: [{ path: "결정.md", operation: "replace", old_text: selected, new_text: "## 승인\n새 결정이다.\n" }] }) });
+  });
+  const proposal = await proposer.generate(fixture().snapshot, undefined, undefined, (value) => measurements.push(value));
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].input, requests[1].input);
+  assert.match(requests[0].instructions, /old_text는 행 중간에서 시작하거나 끝내지 말고/);
+  assert.match(requests[1].instructions, /수정할 원문은 온전한 문단·제목 블록으로 지정해야 해요/);
+  assert.ok(proposal?.changes[0].after_content.includes("## 승인\n새 결정이다."));
+  assert.deepEqual(measurements.map((entry) => entry.usage), [
+    { input_tokens: 100, output_tokens: 20, total_tokens: 120, cached_tokens: 10, reasoning_tokens: 8 },
+    { input_tokens: 200, output_tokens: 40, total_tokens: 240, cached_tokens: 20, reasoning_tokens: 16 }
+  ]);
+  assert.equal(proposer.lastGeneration?.input_chars, requests[0].input.length * 2);
+  assert.equal(proposer.lastGeneration?.evidence_chars, oldText.length * 2);
+});
+
+test("two invalid old_text selections stop after two calls and retain cumulative usage", async () => {
+  const original = "# 원문\n\n## 승인\n이전 결정이다.\n";
+  const oldText = "## 승인\n이전 결정이다.\n";
+  const github = { head: async () => ({ sha: "base", branch: "main" }), file: async () => ({ sha: "blob", content: original }) } as any;
+  let calls = 0; let recorded: any;
+  const proposer = new WikiProposer(config(), github, async (url) => {
+    if (String(url).includes("/api/context")) return Response.json({ evidence: [{ path: "결정.md", content: oldText }] });
+    if (String(url).includes("/api/note")) return Response.json({ note_hash: digest(original) });
+    calls++;
+    return Response.json({ model: "gpt-6-luna", usage: { input_tokens: 50, output_tokens: 10 },
+      answer: JSON.stringify({ conclusion: "새 결정이다.", changes: [{ path: "결정.md", operation: "replace", old_text: "승인\n이전 결정이다.", new_text: "새 결정이다.\n" }] }) });
+  });
+  await assert.rejects(proposer.generate(fixture().snapshot, undefined, undefined, (value) => { recorded = value; }), /수정할 원문은 온전한 문단·제목 블록/);
+  assert.equal(calls, 2);
+  assert.deepEqual(recorded.usage, { input_tokens: 100, output_tokens: 20 });
+  assert.deepEqual(proposer.lastGeneration, recorded);
+});
+
+test("invalid JSON retries, but provider and stale wiki failures never regenerate", async () => {
+  const original = "# 원문\n\n## 승인\n이전 결정이다.\n";
+  const oldText = "## 승인\n이전 결정이다.\n";
+  const github = { head: async () => ({ sha: "base", branch: "main" }), file: async () => ({ sha: "blob", content: original }) } as any;
+  let calls = 0;
+  const format = new WikiProposer(config(), github, async (url) => {
+    if (String(url).includes("/api/context")) return Response.json({ evidence: [{ path: "결정.md", content: oldText }] });
+    if (String(url).includes("/api/note")) return Response.json({ note_hash: digest(original) });
+    calls++;
+    return Response.json({ answer: calls === 1 ? "not JSON" : JSON.stringify({ conclusion: "새 결정이다.", changes: [{ path: "결정.md", operation: "replace", old_text: oldText, new_text: "## 승인\n새 결정이다.\n" }] }) });
+  });
+  assert.ok(await format.generate(fixture().snapshot)); assert.equal(calls, 2);
+  for (const status of [401, 429]) {
+    let providerCalls = 0;
+    const proposer = new WikiProposer(config(), github, async (url) => {
+      if (String(url).includes("/api/context")) return Response.json({ evidence: [] });
+      providerCalls++; return Response.json({}, { status });
+    });
+    await assert.rejects(proposer.generate(fixture().snapshot), new RegExp(String(status)));
+    assert.equal(providerCalls, 1);
+  }
+  let staleCalls = 0;
+  const stale = new WikiProposer(config(), github, async (url) => {
+    if (String(url).includes("/api/context")) return Response.json({ evidence: [{ path: "결정.md", content: oldText }] });
+    if (String(url).includes("/api/note")) return Response.json({ note_hash: "outdated" });
+    staleCalls++;
+    return Response.json({ answer: JSON.stringify({ conclusion: "새 결정이다.", changes: [{ path: "결정.md", operation: "replace", old_text: oldText, new_text: "## 승인\n새 결정이다.\n" }] }) });
+  });
+  await assert.rejects(stale.generate(fixture().snapshot), StaleProposalError);
+  assert.equal(staleCalls, 1);
+});
+
 test("daily snapshots keep a separate backlog cursor and pending snapshots survive partial caps", async () => {
   const cfg = { ...config(), scheduleEnabled: true, dailyMessages: 2, snapshotMessages: 2 };
   const store = new ProposalStore(":memory:"); const now = Date.parse("2026-09-29T00:01:00+09:00");
