@@ -59,21 +59,27 @@ export class WikiGitHub {
     if (actual.length === 0 || actual.length !== proposal.snapshot.participants.length || actual.some((id) => !proposal.snapshot.participants.includes(id))) {
       throw new StaleProposalError("위키 제안의 대화 참여자 목록이 원본과 다릅니다. 제안을 다시 만들어 승인받아 주세요.");
     }
-    const mappings = new Map([...this.config.users].map(([login, discordId]) => [discordId, login]));
-    const missing = actual.filter((id) => !mappings.has(id));
-    if (missing.length) throw new WikiCoauthorError(`GitHub 계정 매핑이 없는 대화 참여자 Discord ID: ${missing.join(", ")}. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
-    const trailers: string[] = []; const ids = new Set<number>();
-    for (const discordId of actual) {
+    const mappings = this.config.coauthorUsers;
+    const eligible = actual.filter((id) => !this.config.coauthorExcludedDiscordIds.has(id));
+    const missing = eligible.filter((id) => !mappings.has(id));
+    if (missing.length) throw new WikiCoauthorError(`GitHub 계정 매핑이 없는 대화 참여자 Discord ID: ${missing.join(", ")}. 위키 공동 작성자 매핑을 확인해 주세요.`);
+    const trailers: string[] = []; const ids = new Set<number>(); const resolved = new Map<string, { id: number; login: string }>();
+    for (const discordId of eligible) {
       const mappedLogin = mappings.get(discordId)!;
-      let user: any;
-      try { user = await this.request(`/users/${encodeURIComponent(mappedLogin)}`); }
-      catch (error) {
-        if (error instanceof GitHubError && error.status === 404) throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}을 찾지 못했어요. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
-        throw error;
-      }
-      if (typeof user?.login !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(user.login)
-        || user.login.toLowerCase() !== mappedLogin.toLowerCase() || !Number.isSafeInteger(user.id) || user.id <= 0 || user.type !== "User") {
-        throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}의 실제 login과 ID를 확인하지 못했어요. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
+      let user = resolved.get(mappedLogin.toLowerCase());
+      if (!user) {
+        let response: any;
+        try { response = await this.request(`/users/${encodeURIComponent(mappedLogin)}`); }
+        catch (error) {
+          if (error instanceof GitHubError && error.status === 404) throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}을 찾지 못했어요. 위키 공동 작성자 매핑을 확인해 주세요.`);
+          throw error;
+        }
+        if (typeof response?.login !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(response.login)
+          || response.login.toLowerCase() !== mappedLogin.toLowerCase() || !Number.isSafeInteger(response.id) || response.id <= 0 || response.type !== "User") {
+          throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}의 실제 login과 ID를 확인하지 못했어요. 위키 공동 작성자 매핑을 확인해 주세요.`);
+        }
+        user = { id: response.id, login: response.login };
+        resolved.set(mappedLogin.toLowerCase(), user);
       }
       if (ids.has(user.id)) continue;
       ids.add(user.id);
@@ -102,7 +108,7 @@ export class WikiGitHub {
     const repo = `/repos/${this.config.repository}`;
     const head = await this.verify(proposal);
     const coauthors = await this.coauthors(proposal);
-    const commitMessage = `feat: Discord 논의 결론을 위키에 반영\n\n${coauthors.join("\n")}`;
+    const commitMessage = `feat: Discord 논의 결론을 위키에 반영${coauthors.length ? `\n\n${coauthors.join("\n")}` : ""}`;
     let branchRef: any = null;
     try { branchRef = await this.request(`${repo}/git/ref/heads/${encodeURIComponent(headBranch)}`); }
     catch (error) { if (!(error instanceof GitHubError) || error.status !== 404) throw error; }
