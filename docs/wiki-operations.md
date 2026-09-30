@@ -11,6 +11,10 @@ Node 24의 내장 SQLite를 사용한다. `runtime` 디렉터리는 gateway 컨�
 
 `WIKI_GITHUB_TOKEN`은 명시적으로 구성한 서버 자동화의 대체 인증이다. 기본 구성은 App을 사용한다.
 
+Draft PR의 커밋에는 Discord 원본 범위에서 메시지를 작성한 사람을 공동 작성자로 기록한다. `DISCORD_USER_MAPPINGS_JSON`의 `{ "github": "GitHub 로그인", "discordUserId": "Discord 사용자 ID" }` 항목으로 참여자 전원을 연결한다. 봇과 webhook 메시지는 제외하고, 게시 직전에 GitHub `/users/{login}`에서 실제 login·숫자 ID·일반 사용자 계정을 확인한다. 커밋에는 확인된 `Co-authored-by: login <id+login@users.noreply.github.com>`을 계정당 한 번씩 넣는다.
+
+참여자 매핑이 없거나 GitHub 신원이 확인되지 않으면 커밋과 PR을 만들지 않는다. 승인된 제안은 재시도 상태로 남기고 안내 메시지에 누락된 Discord ID 또는 확인할 GitHub 로그인을 표시한다. 운영자가 매핑을 고치고 gateway를 재시작하면 다음 재시도에서 같은 승인된 변경안으로 게시한다. 이미 존재하는 제안 브랜치의 커밋에도 같은 공동 작성자 기록이 있어야 PR을 만든다. 이 절차는 기존 참여자 승인과 Draft PR 검증을 그대로 따른다.
+
 ## 대상과 제한
 
 `WIKI_DISCORD_GUILD_ID`를 대상 Framework 서버로 지정한다. 카테고리·일반 채널·포럼 ID는 `.env.example`에 기록한 범위를 사용한다. Discord bot에 View channel, Read message history, Send messages, Attach files와 Message Content Intent가 필요하다. 현재 서버 멤버 조회 권한도 실제 API로 확인한다.

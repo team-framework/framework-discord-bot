@@ -1,8 +1,10 @@
 import { isSnowflake } from "./discord.js";
+import { parseUsers, type DiscordUserMappings } from "./config.js";
 export type WikiConfig = {
   enabled: boolean; guildId: string; categoryIds: Set<string>; channelIds: Set<string>; forumIds: Set<string>;
   serviceUrl: string; serviceKey: string; hermesUrl: string; hermesKey: string; statePath: string;
   repository: string; trackingIssue: number; appClientId: string; privateKeyPath: string; githubToken: string;
+  users: DiscordUserMappings;
   scheduleEnabled: boolean; snapshotMessages: number; snapshotChars: number; dailyMessages: number;
 };
 export function loadWikiConfig(env = process.env): WikiConfig {
@@ -28,6 +30,7 @@ export function loadWikiConfig(env = process.env): WikiConfig {
     statePath: env.WIKI_STATE_PATH || "runtime/wiki-proposals.sqlite", repository,
     trackingIssue: env.WIKI_TRACKING_ISSUE ? integer("WIKI_TRACKING_ISSUE", 1, 1_000_000) : 0,
     appClientId: env.WIKI_GITHUB_APP_CLIENT_ID || "", privateKeyPath: env.WIKI_GITHUB_APP_PRIVATE_KEY_PATH || "", githubToken: env.WIKI_GITHUB_TOKEN || "",
+    users: parseUsers(env.DISCORD_USER_MAPPINGS_JSON || "[]"),
     scheduleEnabled: enabled && env.WIKI_SCHEDULE_ENABLED === "true", snapshotMessages: integer("WIKI_SNAPSHOT_MESSAGES", 300, 500),
     snapshotChars: integer("WIKI_SNAPSHOT_CHARS", 24_000, 100_000), dailyMessages: integer("WIKI_DAILY_MESSAGES", 3_000, 20_000) };
 }

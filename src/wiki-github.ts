@@ -4,6 +4,7 @@ import type { WikiConfig } from "./wiki-config.js";
 import { digest, StaleProposalError, type Proposal } from "./wiki-types.js";
 
 export class GitHubError extends Error { constructor(readonly status: number) { super(`위키 GitHub 요청에 실패했어요 (${status}).`); } }
+export class WikiCoauthorError extends Error {}
 export class WikiGitHub {
   private credential: { token: string; until: number } | null = null;
   constructor(readonly config: WikiConfig, readonly fetchImpl = fetch) {}
@@ -53,6 +54,33 @@ export class WikiGitHub {
     }
     return head;
   }
+  private async coauthors(proposal: Proposal) {
+    const actual = [...new Set(proposal.snapshot.messages.filter((message) => !message.bot && !message.webhook && message.author_id).map((message) => message.author_id))];
+    if (actual.length === 0 || actual.length !== proposal.snapshot.participants.length || actual.some((id) => !proposal.snapshot.participants.includes(id))) {
+      throw new StaleProposalError("위키 제안의 대화 참여자 목록이 원본과 다릅니다. 제안을 다시 만들어 승인받아 주세요.");
+    }
+    const mappings = new Map([...this.config.users].map(([login, discordId]) => [discordId, login]));
+    const missing = actual.filter((id) => !mappings.has(id));
+    if (missing.length) throw new WikiCoauthorError(`GitHub 계정 매핑이 없는 대화 참여자 Discord ID: ${missing.join(", ")}. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
+    const trailers: string[] = []; const ids = new Set<number>();
+    for (const discordId of actual) {
+      const mappedLogin = mappings.get(discordId)!;
+      let user: any;
+      try { user = await this.request(`/users/${encodeURIComponent(mappedLogin)}`); }
+      catch (error) {
+        if (error instanceof GitHubError && error.status === 404) throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}을 찾지 못했어요. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
+        throw error;
+      }
+      if (typeof user?.login !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(user.login)
+        || user.login.toLowerCase() !== mappedLogin.toLowerCase() || !Number.isSafeInteger(user.id) || user.id <= 0 || user.type !== "User") {
+        throw new WikiCoauthorError(`GitHub 사용자 ${mappedLogin}의 실제 login과 ID를 확인하지 못했어요. DISCORD_USER_MAPPINGS_JSON을 확인해 주세요.`);
+      }
+      if (ids.has(user.id)) continue;
+      ids.add(user.id);
+      trailers.push(`Co-authored-by: ${user.login} <${user.id}+${user.login}@users.noreply.github.com>`);
+    }
+    return trailers;
+  }
   async findPublished(proposal: Proposal) {
     if (!this.config.trackingIssue) throw new Error("WIKI_TRACKING_ISSUE 설정이 필요해요.");
     const headBranch = `feat/discord-wiki-${proposal.id}/#${this.config.trackingIssue}`;
@@ -73,20 +101,27 @@ export class WikiGitHub {
     const marker = `<!-- framework-wiki-proposal:${proposal.id}:${proposal.hash} -->`;
     const repo = `/repos/${this.config.repository}`;
     const head = await this.verify(proposal);
+    const coauthors = await this.coauthors(proposal);
+    const commitMessage = `feat: Discord 논의 결론을 위키에 반영\n\n${coauthors.join("\n")}`;
     let branchRef: any = null;
     try { branchRef = await this.request(`${repo}/git/ref/heads/${encodeURIComponent(headBranch)}`); }
     catch (error) { if (!(error instanceof GitHubError) || error.status !== 404) throw error; }
+    let createdBranch = false;
     if (!branchRef) {
       const commit = await this.request(`${repo}/git/commits/${head.sha}`);
       const tree = await this.request(`${repo}/git/trees`, "POST", { base_tree: commit.tree.sha,
         tree: proposal.changes.map((change) => ({ path: change.path, mode: "100644", type: "blob", content: change.after_content })) });
-      const created = await this.request(`${repo}/git/commits`, "POST", { message: "feat: Discord 논의 결론을 위키에 반영", tree: tree.sha, parents: [head.sha] });
-      try { branchRef = await this.request(`${repo}/git/refs`, "POST", { ref: `refs/heads/${headBranch}`, sha: created.sha }); }
+      const created = await this.request(`${repo}/git/commits`, "POST", { message: commitMessage, tree: tree.sha, parents: [head.sha] });
+      try { branchRef = await this.request(`${repo}/git/refs`, "POST", { ref: `refs/heads/${headBranch}`, sha: created.sha }); createdBranch = true; }
       catch (error) { if (!(error instanceof GitHubError) || error.status !== 422) throw error; branchRef = await this.request(`${repo}/git/ref/heads/${encodeURIComponent(headBranch)}`); }
     }
     for (const change of proposal.changes) {
       const current = await this.file(change.path, branchRef.object.sha);
       if (!current || digest(current.content) !== change.after_hash) throw new Error("같은 제안 브랜치에 다른 변경이 있어요. 관리자 확인이 필요해요.");
+    }
+    if (!createdBranch) {
+      const currentCommit = await this.request(`${repo}/git/commits/${branchRef.object.sha}`);
+      if (typeof currentCommit.message !== "string" || currentCommit.message.trimEnd() !== commitMessage) throw new StaleProposalError("기존 위키 제안 브랜치의 공동 작성자 정보가 승인된 참여자와 다릅니다. 관리자 확인이 필요해요.");
     }
     await this.verify(proposal);
     const body = `${proposal.conclusion}\n\n${proposal.changes.map((change) => `- ${change.path}`).join("\n")}\n\n출처: ${proposal.snapshot.messages[0].link} ~ ${proposal.snapshot.messages.at(-1)!.link}\n검증 수준: Discord 논의에서 확인한 결정과 사실. 코드·운영 검증은 별도입니다.\n\nRefs #${this.config.trackingIssue}\n${marker}`;
