@@ -1,6 +1,6 @@
 import { discordApiRequest, editInteractionResponse, sendInteractionCallback } from "./discord.js";
 import type { WikiConfig } from "./wiki-config.js";
-import { WikiGitHub } from "./wiki-github.js";
+import { WikiCoauthorError, WikiGitHub } from "./wiki-github.js";
 import { WikiProposer, type GenerationUsage } from "./wiki-proposer.js";
 import { DiscordSources } from "./wiki-snapshot.js";
 import { ProposalStore } from "./wiki-store.js";
@@ -146,13 +146,14 @@ export class WikiWorkflow {
           if (proposal.hash !== proposalHash(proposal) || proposal.status !== "approved") throw new StaleProposalError("승인한 변경안이 바뀌었어요. 새 제안이 필요해요.");
           const existing = await this.github.findPublished(proposal);
           if (!existing) await this.sources.verify(proposal.snapshot);
-          proposal.pr_url = existing ?? await this.github.publish(proposal); proposal.status = "published"; this.store.finish(proposal);
+          proposal.pr_url = existing ?? await this.github.publish(proposal); proposal.status = "published"; proposal.reason = undefined; this.store.finish(proposal);
           const finalKey = `finalized:${proposal.snapshot.channel_id}`;
           const prior = this.store.state<string>(finalKey);
           if (!prior || BigInt(prior) < BigInt(proposal.snapshot.through_id)) this.store.saveState(finalKey, proposal.snapshot.through_id);
           await this.notice(proposal);
         } catch (error) {
           if (error instanceof StaleProposalError) { proposal.status = "stale"; proposal.reason = error.message; this.store.finish(proposal); await this.notice(proposal).catch(() => {}); }
+          else if (error instanceof WikiCoauthorError) { proposal.reason = error.message; this.store.put(proposal); this.store.retry(proposal.id); await this.notice(proposal).catch(() => {}); }
           else { this.store.retry(proposal.id); console.error("위키 PR 생성 재시도를 예약했어요."); }
         }
       }

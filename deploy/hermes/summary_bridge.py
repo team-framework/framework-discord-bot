@@ -38,7 +38,7 @@ def summarize(body):
             with client.responses.stream(
                 model=MODEL, instructions=instructions,
                 input=[{"role": "user", "content": body["input"]}],
-                reasoning={"effort": "low"}, service_tier="priority", store=False,
+                reasoning={"effort": "max"}, service_tier="priority", store=False,
             ) as stream:
                 for event in stream:
                     if event.type == "response.output_text.delta":
@@ -59,8 +59,11 @@ def summarize(body):
             if not isinstance(summary["conclusion"], list) or not all(isinstance(item, str) for item in summary["conclusion"]):
                 raise ValueError("invalid_conclusion")
             print(json.dumps({"event": "summary_completed", "model": response.model,
-                              "requested_tier": "priority", "returned_tier": response.service_tier}), flush=True)
+                              "reasoning": "max", "requested_tier": "priority", "returned_tier": response.service_tier,
+                              "usage": response.usage.model_dump() if response.usage else None}), flush=True)
             return {"status": "completed", "model": response.model, "service_tier": response.service_tier,
+                    "reasoning": {"effort": "max"},
+                    "usage": response.usage.model_dump() if response.usage else None,
                     "output": [{"content": [{"type": "output_text", "text": text}]}]}
         finally:
             timer.cancel()

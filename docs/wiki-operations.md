@@ -5,11 +5,17 @@ Node 24의 내장 SQLite를 사용한다. `runtime` 디렉터리는 gateway 컨�
 ## 인증 연결
 
 - `WIKI_SERVICE_URL`·`WIKI_SERVICE_KEY`: 위키 서버의 읽기 전용 `/api/context`, `/api/note` API. `Authorization: Bearer` 헤더를 사용한다.
-- `HERMES_WIKI_URL`·`HERMES_WIKI_KEY`: 사설 요약/제안 API. 서버의 `openai-codex` OAuth와 `gpt-6-luna`, `low`를 사용한다. 봇에 OAuth 토큰을 복사하지 않는다.
+- `HERMES_WIKI_URL`·`HERMES_WIKI_KEY`: 사설 요약/제안 API. 서버의 `openai-codex` OAuth와 `gpt-6-luna`, `max`를 사용한다. 봇에 OAuth 토큰을 복사하지 않는다.
 - `WIKI_GITHUB_APP_CLIENT_ID`·`WIKI_GITHUB_APP_PRIVATE_KEY_PATH`: wiki 저장소에 설치된 App. Contents write와 Pull requests write만 요청한다. PEM은 읽기 전용으로 마운트한다.
 - `WIKI_TRACKING_ISSUE`: 미리 만든 지속 추적 이슈. 현재 wiki#73이다. 생성 브랜치는 `feat/discord-wiki-<proposal-id>/#73`, PR은 Draft다. PR 본문은 `Refs #73`을 쓰므로 지속 이슈를 닫지 않는다.
 
 `WIKI_GITHUB_TOKEN`은 명시적으로 구성한 서버 자동화의 대체 인증이다. 기본 구성은 App을 사용한다.
+
+Draft PR의 커밋에는 Discord 원본 범위에서 메시지를 작성한 사람을 공동 작성자로 기록한다. 위키 설정은 기본적으로 `DISCORD_USER_MAPPINGS_JSON`의 `{ "github": "GitHub 로그인", "discordUserId": "Discord 사용자 ID" }` 배열을 읽는다. 한 사람이 Discord 계정 여러 개를 쓰면 같은 형식의 전체 매핑을 `WIKI_COAUTHOR_MAPPINGS_JSON`에 별도로 지정한다. 이 값은 기본 배열을 대체하며 GitHub 알림용 매핑은 바꾸지 않는다. 같은 GitHub 계정에 여러 Discord ID를 연결할 수 있지만, 한 Discord ID를 서로 다른 GitHub 계정에 연결할 수 없다.
+
+공동 작성자에서 제외할 사람 작성자는 `WIKI_COAUTHOR_EXCLUDED_DISCORD_IDS`에 Discord ID를 쉼표로 구분해 명시한다. 이 설정은 제안의 원본 참여자 확인과 승인 권한을 바꾸지 않는다. 봇과 webhook 메시지도 공동 작성자에서 제외한다. 게시 직전에 GitHub `/users/{login}`에서 실제 login·숫자 ID·일반 사용자 계정을 확인하고, 커밋에는 `Co-authored-by: login <id+login@users.noreply.github.com>`을 계정당 한 번씩 넣는다. 원본 범위의 사람 작성자가 모두 명시적 제외 대상이면 공동 작성자 트레일러 없이 커밋한다.
+
+참여자 매핑이 없거나 GitHub 신원이 확인되지 않으면 커밋과 PR을 만들지 않는다. 승인된 제안은 재시도 상태로 남기고 안내 메시지에 누락된 Discord ID 또는 확인할 GitHub 로그인을 표시한다. 운영자가 매핑을 고치고 gateway를 재시작하면 다음 재시도에서 같은 승인된 변경안으로 게시한다. 이미 존재하는 제안 브랜치의 커밋에도 같은 공동 작성자 기록이 있어야 PR을 만든다. 이 절차는 기존 참여자 승인과 Draft PR 검증을 그대로 따른다.
 
 ## 대상과 제한
 

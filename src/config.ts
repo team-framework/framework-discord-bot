@@ -54,15 +54,18 @@ function parseChannels(value: string, repositories: Set<string>) {
   return channels;
 }
 
-function parseUsers(value: string) {
+export function parseUsers(value: string) {
   const parsed = parseJson(value, "DISCORD_USER_MAPPINGS_JSON");
   if (!Array.isArray(parsed)) throw new Error("DISCORD_USER_MAPPINGS_JSON은 배열이어야 해요.");
   const users = new Map<string, string>();
+  const githubNames = new Set<string>();
+  const discordIds = new Set<string>();
   for (const item of parsed) {
     const github = typeof item?.github === "string" ? item.github.trim() : "";
     const discordUserId = typeof item?.discordUserId === "string" ? item.discordUserId.trim() : "";
-    if (!github || !isSnowflake(discordUserId) || users.has(github)) throw new Error("GitHub 사용자와 Discord 사용자 ID의 일대일 매핑이 필요해요.");
+    if (!github || !isSnowflake(discordUserId) || githubNames.has(github.toLowerCase()) || discordIds.has(discordUserId)) throw new Error("GitHub 사용자와 Discord 사용자 ID의 일대일 매핑이 필요해요.");
     users.set(github, discordUserId);
+    githubNames.add(github.toLowerCase()); discordIds.add(discordUserId);
   }
   return users;
 }

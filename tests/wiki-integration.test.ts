@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { loadWikiConfig } from "../src/wiki-config.js";
-import { WikiGitHub } from "../src/wiki-github.js";
+import { WikiCoauthorError, WikiGitHub } from "../src/wiki-github.js";
 import { WikiProposer } from "../src/wiki-proposer.js";
 import { DiscordSources, makeSnapshot } from "../src/wiki-snapshot.js";
 import { ProposalStore } from "../src/wiki-store.js";
@@ -14,8 +14,10 @@ import { WikiWorkflow } from "../src/wiki-workflow.js";
 
 const guild = "123456789012345678"; const channel = "123456789012345679"; const category = "123456789012345680";
 const human = "123456789012345681"; const other = "123456789012345682";
-const config = () => loadWikiConfig({ WIKI_PROPOSALS_ENABLED: "true", WIKI_DISCORD_GUILD_ID: guild, WIKI_DISCORD_CATEGORY_IDS: category,
-  WIKI_SERVICE_KEY: "read-only-test", HERMES_WIKI_KEY: "hermes-test", WIKI_TRACKING_ISSUE: "73", WIKI_GITHUB_TOKEN: "test" });
+const alias = "123456789012345685"; const mentor = "123456789012345686";
+const config = (overrides: NodeJS.ProcessEnv = {}) => loadWikiConfig({ WIKI_PROPOSALS_ENABLED: "true", WIKI_DISCORD_GUILD_ID: guild, WIKI_DISCORD_CATEGORY_IDS: category,
+  WIKI_SERVICE_KEY: "read-only-test", HERMES_WIKI_KEY: "hermes-test", WIKI_TRACKING_ISSUE: "73", WIKI_GITHUB_TOKEN: "test",
+  DISCORD_USER_MAPPINGS_JSON: JSON.stringify([{ github: "first-user", discordUserId: human }, { github: "second-user", discordUserId: other }]), ...overrides });
 const channelData = { id: channel, type: 0, guild_id: guild, parent_id: category, name: "기술 논의" };
 function message(index: number, author = human, overrides: any = {}) {
   return { id: String(123456789012346000n + BigInt(index)), author: { id: author, bot: false }, content: `결정 ${index}: 승인 후 반영한다.`, timestamp: "2026-09-29T00:00:00.000Z", attachments: [], ...overrides };
@@ -37,6 +39,16 @@ test("source snapshots retain identity, edits, replies and unread attachments; w
   const refreshed = makeSnapshot(guild, channelData, [message(1, human, { attachments: [{ id: "a", filename: "data.png", size: 100, url: "https://cdn.discordapp.com/a?hm=next" }] })]);
   const original = makeSnapshot(guild, channelData, [message(1, human, { attachments: [{ id: "a", filename: "data.png", size: 100, url: "https://cdn.discordapp.com/a?hm=old" }] })]);
   assert.equal(original.source_hash, refreshed.source_hash);
+});
+
+test("wiki coauthor mappings allow account aliases without changing notification mappings", () => {
+  assert.equal(config().coauthorUsers.get(human), "first-user");
+  const override = config({ WIKI_COAUTHOR_MAPPINGS_JSON: JSON.stringify([{ github: "first-user", discordUserId: human }, { github: "first-user", discordUserId: alias }]), WIKI_COAUTHOR_EXCLUDED_DISCORD_IDS: mentor });
+  assert.equal(override.coauthorUsers.get(alias), "first-user");
+  assert.equal(override.coauthorUsers.has(other), false);
+  assert.equal(override.coauthorExcludedDiscordIds.has(mentor), true);
+  assert.throws(() => config({ WIKI_COAUTHOR_MAPPINGS_JSON: JSON.stringify([{ github: "first-user", discordUserId: human }, { github: "second-user", discordUserId: human }]) }), /Discord ID마다 GitHub/);
+  assert.throws(() => config({ WIKI_COAUTHOR_EXCLUDED_DISCORD_IDS: "invalid" }), /Discord ID가 올바르지/);
 });
 
 test("participant approval requires exact guild/channel and current membership", async () => {
@@ -100,7 +112,11 @@ test("approved hashes bind source, exact final bytes and human conclusions", () 
 
 test("GitHub publication is a deterministic Draft PR and recovers an uncertain successful POST", async () => {
   const proposal = fixture(); let created: any = null; let branch: any = null; let posts = 0;
-  const github = new WikiGitHub(config(), async (url, init) => {
+  proposal.snapshot = makeSnapshot(guild, channelData, [message(1), message(2, other), message(3, alias), message(4, mentor), message(5, other), message(6, "123456789012345683", { author: { id: "123456789012345683", bot: true } }), message(7, "123456789012345684", { webhook_id: "hook" })]);
+  proposal.hash = proposalHash(proposal);
+  const cfg = config({ WIKI_COAUTHOR_MAPPINGS_JSON: JSON.stringify([{ github: "first-user", discordUserId: human }, { github: "second-user", discordUserId: other }, { github: "first-user", discordUserId: alias }]), WIKI_COAUTHOR_EXCLUDED_DISCORD_IDS: mentor });
+  let firstUserLookups = 0;
+  const github = new WikiGitHub(cfg, async (url, init) => {
     const endpoint = new URL(String(url)); const route = endpoint.pathname; const body = init?.body ? JSON.parse(String(init.body)) : null;
     if (route.endsWith("/pulls") && init?.method === "POST") { posts++; assert.equal(body.draft, true); assert.match(body.head, /\/#73$/); assert.ok(!body.body.includes("Closes")); created = { html_url: "https://github.com/team-framework/framework-llm-wiki/pull/99", body: body.body, head: { sha: "branch-commit" } }; throw new Error("connection lost after delivery"); }
     if (route.endsWith("/pulls")) return Response.json(created ? [created] : []);
@@ -110,12 +126,91 @@ test("GitHub publication is a deterministic Draft PR and recovers an uncertain s
     if (route.includes("/contents/")) { const isAfter = endpoint.searchParams.get("ref") === "branch-commit"; return Response.json({ type: "file", encoding: "base64", sha: isAfter ? "blob-after" : "blob-before", content: Buffer.from(isAfter ? proposal.changes[0].after_content : proposal.changes[0].before_content).toString("base64") }); }
     if (route.endsWith("/git/commits/base")) return Response.json({ tree: { sha: "base-tree" } });
     if (route.endsWith("/git/trees")) return Response.json({ sha: "new-tree" });
-    if (route.endsWith("/git/commits")) return Response.json({ sha: "branch-commit" });
+    if (route.endsWith("/git/commits")) { assert.equal(body.message, "feat: Discord 논의 결론을 위키에 반영\n\nCo-authored-by: first-user <101+first-user@users.noreply.github.com>\nCo-authored-by: second-user <202+second-user@users.noreply.github.com>"); return Response.json({ sha: "branch-commit" }); }
+    if (route.endsWith("/users/first-user")) { firstUserLookups++; return Response.json({ id: 101, login: "first-user", type: "User" }); }
+    if (route.endsWith("/users/second-user")) return Response.json({ id: 202, login: "second-user", type: "User" });
     if (route.endsWith("/git/refs")) { branch = { object: { sha: "branch-commit" } }; return Response.json(branch); }
     throw new Error(`unexpected ${route}`);
   });
   await assert.rejects(github.publish(proposal), /connection lost/);
-  assert.equal(await github.publish(proposal), created.html_url); assert.equal(posts, 1);
+  assert.equal(await github.publish(proposal), created.html_url); assert.equal(posts, 1); assert.equal(firstUserLookups, 1);
+});
+
+test("a snapshot with only excluded human participants still publishes without coauthor trailers", async () => {
+  const proposal = fixture(); const cfg = config({ WIKI_COAUTHOR_EXCLUDED_DISCORD_IDS: human });
+  let commitMessage = "";
+  const github = new WikiGitHub(cfg, async (url, init) => {
+    const endpoint = new URL(String(url)); const route = endpoint.pathname;
+    if (route.endsWith("/pulls") && init?.method === "POST") return Response.json({ html_url: "https://github.com/team-framework/framework-llm-wiki/pull/100" });
+    if (route.endsWith("/pulls")) return Response.json([]);
+    if (route.endsWith("/framework-llm-wiki")) return Response.json({ default_branch: "main" });
+    if (route.includes("/git/ref/heads/main")) return Response.json({ object: { sha: "base" } });
+    if (route.includes("/git/ref/heads/feat")) return Response.json({}, { status: 404 });
+    if (route.includes("/contents/")) { const after = endpoint.searchParams.get("ref") === "branch-commit"; return Response.json({ type: "file", encoding: "base64", sha: after ? "blob-after" : "blob-before", content: Buffer.from(after ? proposal.changes[0].after_content : proposal.changes[0].before_content).toString("base64") }); }
+    if (route.endsWith("/git/commits/base")) return Response.json({ tree: { sha: "base-tree" } });
+    if (route.endsWith("/git/trees")) return Response.json({ sha: "new-tree" });
+    if (route.endsWith("/git/commits")) { commitMessage = JSON.parse(String(init?.body)).message; return Response.json({ sha: "branch-commit" }); }
+    if (route.endsWith("/git/refs")) return Response.json({ object: { sha: "branch-commit" } });
+    throw new Error(`unexpected ${route}`);
+  });
+  await github.publish(proposal);
+  assert.equal(commitMessage, "feat: Discord 논의 결론을 위키에 반영");
+});
+
+test("unmapped or unverified participants stop publication before GitHub writes", async () => {
+  const proposal = fixture();
+  const cfg = config(); cfg.coauthorUsers.clear();
+  let writes = 0;
+  const github = new WikiGitHub(cfg, async (_url, init) => { if (init?.method !== "GET") writes++; throw new Error("unexpected GitHub request"); });
+  github.findPublished = async () => null;
+  github.head = async () => ({ branch: "main", sha: "base" });
+  github.file = async () => ({ sha: proposal.changes[0].before_blob!, content: proposal.changes[0].before_content });
+  await assert.rejects(github.publish(proposal), (error: unknown) => error instanceof WikiCoauthorError && error.message.includes(human));
+  assert.equal(writes, 0);
+
+  cfg.coauthorUsers.set(human, "first-user");
+  const invalid = new WikiGitHub(cfg, async (url, init) => {
+    if (init?.method !== "GET") writes++;
+    assert.match(String(url), /\/users\/first-user$/);
+    return Response.json({ id: 101, login: "another-user", type: "User" });
+  });
+  invalid.findPublished = github.findPublished; invalid.head = github.head; invalid.file = github.file;
+  await assert.rejects(invalid.publish(proposal), WikiCoauthorError);
+  const missingUser = new WikiGitHub(cfg, async () => Response.json({}, { status: 404 }));
+  missingUser.findPublished = github.findPublished; missingUser.head = github.head; missingUser.file = github.file;
+  await assert.rejects(missingUser.publish(proposal), (error: unknown) => error instanceof WikiCoauthorError && error.message.includes("first-user"));
+  assert.equal(writes, 0);
+});
+
+test("an existing proposal branch cannot publish a commit without approved coauthors", async () => {
+  const proposal = fixture(); let writes = 0;
+  const github = new WikiGitHub(config(), async (url, init) => {
+    if (init?.method !== "GET") writes++;
+    const route = new URL(String(url)).pathname;
+    if (route.endsWith("/users/first-user")) return Response.json({ id: 101, login: "first-user", type: "User" });
+    if (route.includes("/git/ref/heads/feat")) return Response.json({ object: { sha: "old-branch" } });
+    if (route.endsWith("/git/commits/old-branch")) return Response.json({ message: "feat: Discord 논의 결론을 위키에 반영" });
+    throw new Error(`unexpected ${route}`);
+  });
+  github.findPublished = async () => null;
+  github.head = async () => ({ branch: "main", sha: "base" });
+  github.file = async (_path, ref) => ref === "old-branch"
+    ? { sha: "after", content: proposal.changes[0].after_content }
+    : { sha: proposal.changes[0].before_blob!, content: proposal.changes[0].before_content };
+  await assert.rejects(github.publish(proposal), StaleProposalError);
+  assert.equal(writes, 0);
+});
+
+test("coauthor mapping errors remain approved and retryable", async () => {
+  const store = new ProposalStore(":memory:"); const proposal = fixture(); store.put(proposal); store.approve(proposal.id, proposal.hash, human);
+  const workflow = new WikiWorkflow(config(), "test", store); workflow.notice = async () => {};
+  workflow.sources.verify = async () => {}; workflow.github.findPublished = async () => null;
+  workflow.github.publish = async () => { throw new WikiCoauthorError(`GitHub 계정 매핑이 없는 대화 참여자 Discord ID: ${human}`); };
+  await workflow.work();
+  const saved = store.get(proposal.id)!;
+  assert.equal(saved.status, "approved"); assert.match(saved.reason!, new RegExp(human));
+  assert.equal(store.claim(Date.now() + 60_001)?.id, proposal.id);
+  store.close();
 });
 
 test("stale GitHub blob blocks publication before any branch mutation", async () => {
@@ -136,7 +231,7 @@ test("proposal generation uses bounded source evidence and precise replacements,
   const proposer = new WikiProposer(config(), github, async (url, init) => {
     if (String(url).includes("/api/context")) return Response.json({ evidence: [{ path: "결정.md", content: oldText }] });
     if (String(url).includes("/api/note")) return Response.json({ note_hash: digest(original) });
-    const body = JSON.parse(String(init?.body)); assert.equal(body.reasoning, "low"); assert.ok(body.instructions.includes("데이터"));
+    const body = JSON.parse(String(init?.body)); assert.equal(body.reasoning, "max"); assert.ok(body.instructions.includes("데이터"));
     return Response.json({ answer: JSON.stringify({ conclusion: "새 결정이다.", uncertainties: [], changes: [{ path: "결정.md", operation: "replace", old_text: oldText, new_text: "## 승인\n새 결정이다.\n" }] }) });
   });
   const proposal = await proposer.generate(fixture().snapshot); assert.ok(proposal);
@@ -295,7 +390,7 @@ test('generation usage records no-update and provider failure separately without
   const store = new ProposalStore(':memory:');
   const workflow = new WikiWorkflow(config(), 'test', store);
   const snapshot = fixture().snapshot;
-  const usage = {model:'gpt-6-luna',reasoning:'low',input_chars:140,evidence_chars:40,usage:{input_tokens:100,output_tokens:20,cached_tokens:10}};
+  const usage = {model:'gpt-6-luna',reasoning:'max',input_chars:140,evidence_chars:40,usage:{input_tokens:100,output_tokens:20,cached_tokens:10}};
   workflow.proposer.generate = async (_snapshot, _conclusion, _previous, callback) => { callback?.(usage); return null; };
   assert.equal(await workflow.propose(snapshot), null);
   workflow.proposer.generate = async () => { throw new Error('provider unavailable'); };
@@ -322,7 +417,7 @@ test('new design, planning and schedule documents use create proposals and await
     let usage:any;const proposal=await proposer.generate(fixture().snapshot,undefined,undefined,value=>{usage=value;});
     assert.equal(proposal?.status,'pending');assert.equal(proposal?.changes[0].before_blob,null);
     assert.ok(proposal?.changes[0].after_content.includes(body));assert.match(proposal!.changes[0].after_content,/verification: chat-derived/);
-    assert.equal(usage.usage.cached_tokens,20);assert.equal(usage.usage.reasoning_tokens,5);
+    assert.equal(usage.reasoning,'max');assert.equal(usage.usage.cached_tokens,20);assert.equal(usage.usage.reasoning_tokens,5);
     assert.equal(proposal?.approved_by,undefined);
   }
 });
