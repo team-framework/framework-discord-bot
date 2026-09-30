@@ -1,0 +1,17 @@
+{
+  "bot_id": "123456789012345678",
+  "cases": [
+    { "name": "direct deployment update", "content": "<@123456789012345678> One Store 배포 완료 https://m.onestore.co.kr/v2/ko-kr/app/0001009427 이거로 위키 갱신해", "mentioned": true, "expected": true },
+    { "name": "nickname mention update", "content": "<@!123456789012345678> 위키에 이 내용을 반영해 줘", "mentioned": true, "expected": true },
+    { "name": "english wiki update", "content": "<@123456789012345678> wiki 업데이트해주세요", "mentioned": true, "expected": true },
+    { "name": "no direct mention", "content": "위키 갱신해", "mentioned": false, "expected": false },
+    { "name": "unresolved mention text", "content": "<@123456789012345678> 위키 갱신해", "mentioned": false, "expected": false },
+    { "name": "another mention", "content": "<@123456789012345679> 위키 갱신해", "mentioned": false, "expected": false },
+    { "name": "negated update", "content": "<@123456789012345678> 위키 갱신하지마", "mentioned": true, "expected": false },
+    { "name": "procedural question", "content": "<@123456789012345678> 위키 어떻게 갱신해?", "mentioned": true, "expected": false },
+    { "name": "capability question", "content": "<@123456789012345678> 위키 갱신할 수 있어?", "mentioned": true, "expected": false },
+    { "name": "non-wiki action", "content": "<@123456789012345678> 앱 업데이트해줘", "mentioned": true, "expected": false },
+    { "name": "url cannot supply wiki target", "content": "<@123456789012345678> https://example.com/wiki 앱 업데이트해줘", "mentioned": true, "expected": false },
+    { "name": "no imperative", "content": "<@123456789012345678> 위키 갱신 결과를 봤어", "mentioned": true, "expected": false }
+  ]
+}
