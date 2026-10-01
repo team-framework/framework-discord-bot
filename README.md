@@ -15,6 +15,8 @@ Issue, 브랜치 생성, push, 라벨, workflow, 배포 등은 구독·전송하
 
 ## `/스레드-정리`
 
+`/스레드-정리 노션참고:true`는 스레드의 Notion 링크를 최대 3개 읽고 참고 문서 링크를 함께 표시합니다. `WIKI_SERVICE_URL`과 `WIKI_SERVICE_KEY`로 Wiki 서버의 읽기 API를 호출합니다. Notion 토큰은 Wiki 서버에만 저장합니다. 기본 명령은 대화만 정리하며, 참고 문서 내용을 Discord 대화의 사건이나 팀 합의로 표현하지 않도록 별도 지시를 전달합니다. 접근할 수 없는 문서는 조회 실패로 표시합니다. Wiki 서버의 Notion 기능을 먼저 배포해야 합니다.
+
 Gateway가 `/스레드-정리` 명령을 등록하고, 일반 답글 스레드와 독립 생성 스레드의 최근 500개 메시지를 익명화해 정리합니다. 결과는 `3줄 요약 → 시간순 타임라인 → 다음 작업` 형식으로 원본 채널에 남깁니다. 기본 OpenAI API 구성의 `gpt-5-nano`는 `reasoning.effort: minimal`, `store: false`를 사용합니다. Hermes 구성은 아래 절차에 따라 `gpt-6-luna`를 사용합니다.
 
 ## PR 알림용 GitHub App 설정

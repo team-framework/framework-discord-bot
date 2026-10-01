@@ -18,6 +18,8 @@ export type Config = {
   hermesSummaryKey: string | null;
   openAIKey: string | null;
   openAIModel: string;
+  wikiServiceUrl: string;
+  wikiServiceKey: string | null;
 };
 
 function required(env: NodeJS.ProcessEnv, name: string) {
@@ -99,6 +101,8 @@ export function loadConfig(env = process.env): Config {
     hermesSummaryUrl: env.HERMES_SUMMARY_URL?.trim() || "http://127.0.0.1:8646/v1/responses",
     hermesSummaryKey: env.HERMES_SUMMARY_KEY?.trim() || null,
     openAIKey: env.OPENAI_API_KEY?.trim() || null,
-    openAIModel: summaryProvider === "hermes" ? "gpt-6-luna" : env.OPENAI_MODEL?.trim() || "gpt-5-nano"
+    openAIModel: summaryProvider === "hermes" ? "gpt-6-luna" : env.OPENAI_MODEL?.trim() || "gpt-5-nano",
+    wikiServiceUrl: env.WIKI_SERVICE_URL?.trim() || "http://127.0.0.1:3100",
+    wikiServiceKey: env.WIKI_SERVICE_KEY?.trim() || null
   };
 }
