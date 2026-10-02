@@ -1,5 +1,7 @@
 # Hermes 운영
 
+Discord의 문서 질문은 platform_hints.discord.append에서 Wiki·Notion 통합 조회를 먼저 지정한다. 스킬을 열지 않은 턴에도 같은 검색 경로와 근거 예산을 안내하며, 기존 Discord 문체와 다른 플랫폼의 지침을 보존한다. 설정을 다시 적용해도 이 지침을 중복 추가하지 않는다.
+
 ## 2026-09-30 Discord 위키 요청 복구
 
 Hermes의 Wiki MCP OAuth 갱신이 400으로 실패해 검색 도구를 등록하지 못했다. 자연어 멘션에는 위키 변경안을 만드는 경로도 없었다.
