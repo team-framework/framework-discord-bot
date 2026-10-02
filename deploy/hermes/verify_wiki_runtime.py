@@ -67,7 +67,14 @@ def verify(home, runtime, query, exercise_refresh=False):
         visible = set(catalog.get('tools', {}))
         if removed - visible:
             raise RuntimeError('Existing agent did not receive the restored tools')
-        _run_on_mcp_loop(server._keepalive_probe, timeout=40)
+        async def locked_keepalive():
+            import asyncio
+            async with server._rpc_lock:
+                await server._keepalive_probe()
+            pending = list(server._pending_refresh_tasks)
+            if pending:
+                await asyncio.gather(*pending)
+        _run_on_mcp_loop(locked_keepalive, timeout=40)
         report.update(after_refresh=len(names()), existing_agent_catalog_tools=catalog.get('total_available'),
                       notion_tools_visible=sorted(visible))
     print('Wiki check: reading current Wiki and Notion evidence', file=sys.stderr, flush=True)

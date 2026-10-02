@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from mcp_refresh_patch import (HEALTH_AFTER, HEALTH_BEFORE, TRANSPORT_AFTER,
-                               TRANSPORT_BEFORE, patch_runtime, replace_once)
+                               TRANSPORT_BEFORE, LEGACY_HEALTH_AFTER, patch_runtime, replace_once)
 
 
 TRANSPORT = '''class Server:
@@ -89,17 +89,37 @@ class PollTests(unittest.TestCase):
         exec(replace_once(HEALTH, HEALTH_BEFORE, HEALTH_AFTER), scope)
         for enabled in [True, False]:
             server = scope['Server'](); server._config = {'refresh_tools_on_keepalive': enabled}
-            server._refresh_tools = AsyncMock(); server.session = NS(list_tools=AsyncMock())
+            server._schedule_tools_refresh = unittest.mock.Mock(); server.session = NS(list_tools=AsyncMock())
             asyncio.run(server._keepalive_probe())
-            self.assertEqual(server._refresh_tools.await_count, int(enabled))
-            self.assertEqual(server.session.list_tools.await_count, int(not enabled))
+            self.assertEqual(server._schedule_tools_refresh.call_count, int(enabled))
+            self.assertEqual(server.session.list_tools.await_count, 1)
 
     def test_failed_refresh_propagates_to_existing_reconnect_handler(self):
         scope = {'asyncio': asyncio, '_KEEPALIVE_RPC_TIMEOUT': 2}
         exec(replace_once(HEALTH, HEALTH_BEFORE, HEALTH_AFTER), scope)
         server = scope['Server'](); server._config = {'refresh_tools_on_keepalive': True}
-        server._refresh_tools = AsyncMock(side_effect=ConnectionError('disconnected'))
+        server.session = NS(list_tools=AsyncMock(side_effect=ConnectionError('disconnected')))
         with self.assertRaises(ConnectionError): asyncio.run(server._keepalive_probe())
+
+    def test_keepalive_under_rpc_lock_refreshes_after_release(self):
+        async def check():
+            scope = {'asyncio': asyncio, '_KEEPALIVE_RPC_TIMEOUT': 0.2}
+            exec(replace_once(HEALTH, HEALTH_BEFORE, HEALTH_AFTER), scope)
+            server = scope['Server'](); server._config = {'refresh_tools_on_keepalive': True}
+            server.session = NS(list_tools=AsyncMock()); lock = asyncio.Lock(); refreshed = asyncio.Event()
+            async def refresh():
+                async with lock:
+                    await server.session.list_tools()
+                    refreshed.set()
+            tasks = []
+            server._schedule_tools_refresh = lambda: tasks.append(asyncio.create_task(refresh()))
+            async with lock:
+                await asyncio.wait_for(server._keepalive_probe(), timeout=0.3)
+                self.assertFalse(refreshed.is_set())
+            await asyncio.wait_for(refreshed.wait(), timeout=0.3)
+            await asyncio.gather(*tasks)
+            self.assertEqual(server.session.list_tools.await_count, 2)
+        asyncio.run(check())
 
 
 class PatchTests(unittest.TestCase):
@@ -125,6 +145,14 @@ class PatchTests(unittest.TestCase):
             with self.assertRaises(ValueError): patch_runtime(root)
             self.assertEqual((tools / 'mcp_tool_transport.py').read_text(), TRANSPORT)
             self.assertFalse(list(tools.glob('*.framework-before-mcp-refresh')))
+
+    def test_upgrades_lock_reentrant_patch(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp); tools = self.runtime(root)
+            (tools / 'mcp_tool_health.py').write_text(replace_once(HEALTH, HEALTH_BEFORE, LEGACY_HEALTH_AFTER))
+            self.assertEqual(patch_runtime(root), 2)
+            self.assertIn(HEALTH_AFTER, (tools / 'mcp_tool_health.py').read_text())
+            self.assertNotIn(LEGACY_HEALTH_AFTER, (tools / 'mcp_tool_health.py').read_text())
 
 
 if __name__ == '__main__': unittest.main()

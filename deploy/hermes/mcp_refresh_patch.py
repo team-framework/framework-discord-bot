@@ -21,9 +21,17 @@ TRANSPORT_AFTER = '''        if self._registered_tool_names:
 HEALTH_BEFORE = '''        async def list_tools():
             await asyncio.wait_for(self.session.list_tools(), timeout=_KEEPALIVE_RPC_TIMEOUT)
 '''
-HEALTH_AFTER = '''        # Framework: opt-in polling also reconciles tools when no notification is sent.
+LEGACY_HEALTH_AFTER = '''        # Framework: opt-in polling also reconciles tools when no notification is sent.
         if self._config.get("refresh_tools_on_keepalive", False):
             await asyncio.wait_for(self._refresh_tools(), timeout=_KEEPALIVE_RPC_TIMEOUT)
+            return
+        async def list_tools():
+            await asyncio.wait_for(self.session.list_tools(), timeout=_KEEPALIVE_RPC_TIMEOUT)
+'''
+HEALTH_AFTER = '''        # Framework: the keepalive caller already owns _rpc_lock. Reconcile afterward.
+        if self._config.get("refresh_tools_on_keepalive", False):
+            await asyncio.wait_for(self.session.list_tools(), timeout=_KEEPALIVE_RPC_TIMEOUT)
+            self._schedule_tools_refresh()
             return
         async def list_tools():
             await asyncio.wait_for(self.session.list_tools(), timeout=_KEEPALIVE_RPC_TIMEOUT)
@@ -47,6 +55,8 @@ def patch_runtime(runtime):
     # Validate both files before changing either file.
     for path, before, after in patches:
         source = path.read_text()
+        if path.name == 'mcp_tool_health.py' and LEGACY_HEALTH_AFTER in source:
+            source = source.replace(LEGACY_HEALTH_AFTER, HEALTH_BEFORE, 1)
         result = replace_once(source, before, after)
         compile(result, str(path), 'exec')
         if result != source:
