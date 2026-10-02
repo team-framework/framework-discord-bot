@@ -51,6 +51,7 @@ def configure(hermes_home, wiki_env, bot_envs, enable_mentions=False):
     server.pop('oauth', None)
     server['enabled'] = True
     server['strict_redirect_headers'] = True
+    server['refresh_tools_on_keepalive'] = True
     server['headers'] = {k: v for k, v in server.get('headers', {}).items() if k.lower() != 'authorization'}
     server['headers']['Authorization'] = 'Bearer ${FRAMEWORK_WIKI_SERVICE_KEY}'
     updates = {'FRAMEWORK_WIKI_SERVICE_KEY': key}

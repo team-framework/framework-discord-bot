@@ -37,6 +37,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn('auth', mcp); self.assertNotIn('oauth', mcp)
             self.assertEqual(mcp['headers']['Authorization'], 'Bearer ${FRAMEWORK_WIKI_SERVICE_KEY}')
             self.assertEqual(mcp['headers']['X-Test'], 'keep')
+            self.assertTrue(mcp['refresh_tools_on_keepalive'])
             self.assertNotIn('k' * 40, (home / 'config.yaml').read_text())
             self.assertIn('EXISTING_VALUE=keep', (home / '.env').read_text())
             self.assertEqual((backup / 'hermes.env').stat().st_mode & 0o777, 0o600)
