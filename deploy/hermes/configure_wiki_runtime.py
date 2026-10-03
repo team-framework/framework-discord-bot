@@ -64,6 +64,7 @@ def configure(hermes_home, wiki_env, bot_envs, enable_mentions=False):
         raise ValueError('Existing Hermes ChatGPT OAuth provider is required')
     model['default'] = 'gpt-6-luna'
     config.setdefault('agent', {}).update(reasoning_effort='max', service_tier='priority')
+    config.setdefault('display', {})['busy_input_mode'] = 'steer'
     servers = config.get('mcp_servers', {})
     if not isinstance(servers.get('framework_wiki'), dict):
         raise ValueError('Existing framework_wiki MCP configuration is required')
@@ -78,7 +79,7 @@ def configure(hermes_home, wiki_env, bot_envs, enable_mentions=False):
     server['headers'] = {k: v for k, v in server.get('headers', {}).items() if k.lower() != 'authorization'}
     server['headers']['Authorization'] = 'Bearer ${FRAMEWORK_WIKI_SERVICE_KEY}'
     append_wiki_hint(config)
-    updates = {'FRAMEWORK_WIKI_SERVICE_KEY': key}
+    updates = {'FRAMEWORK_WIKI_SERVICE_KEY': key, 'HERMES_GATEWAY_BUSY_INPUT_MODE': 'steer'}
     if enable_mentions:
         bot = {}
         for path in bot_envs:

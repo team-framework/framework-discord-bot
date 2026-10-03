@@ -21,7 +21,7 @@ class RuntimeTests(unittest.TestCase):
                   'mcp_servers': {'framework_wiki': {'url': 'https://framework-wiki.chaeyn.com/mcp',
                   'auth': 'oauth', 'oauth': {'redirect_port': 123}, 'headers': {'X-Test': 'keep'}}}}
         (home / 'config.yaml').write_text(yaml.safe_dump(config))
-        (home / '.env').write_text('EXISTING_VALUE=keep\n')
+        (home / '.env').write_text('EXISTING_VALUE=keep\nHERMES_GATEWAY_BUSY_INPUT_MODE=queue\n')
         wiki = root / 'wiki.env'; wiki.write_text('WIKI_SERVICE_KEY=' + 'k' * 40 + '\n')
         bot = root / 'bot.env'; bot.write_text('WIKI_PROPOSALS_ENABLED=true\nWIKI_DISCORD_GUILD_ID=123456789012345678\nWIKI_DISCORD_CATEGORY_IDS=223456789012345678\n')
         return home, wiki, bot
@@ -33,6 +33,9 @@ class RuntimeTests(unittest.TestCase):
             cfg = yaml.safe_load((home / 'config.yaml').read_text())
             self.assertEqual(cfg['agent'], {'max_turns': 90, 'reasoning_effort': 'max', 'service_tier': 'priority'})
             self.assertTrue(cfg['discord']['require_mention'])
+            self.assertEqual(cfg['display']['busy_input_mode'], 'steer')
+            self.assertIn('HERMES_GATEWAY_BUSY_INPUT_MODE=steer', (home / '.env').read_text())
+            self.assertNotIn('HERMES_GATEWAY_BUSY_INPUT_MODE=queue', (home / '.env').read_text())
             mcp = cfg['mcp_servers']['framework_wiki']
             self.assertNotIn('auth', mcp); self.assertNotIn('oauth', mcp)
             self.assertEqual(mcp['headers']['Authorization'], 'Bearer ${FRAMEWORK_WIKI_SERVICE_KEY}')

@@ -66,7 +66,7 @@ if (process.argv[1]?.endsWith("gateway.js") || process.argv[1]?.endsWith("gatewa
     const knownCommand = interaction.type === 2 && ["위키-제안", "스레드-정리"].includes(interaction.data?.name);
     if (knownCommand) console.log(`Discord Gateway 명령 수신 ${++receivedCommands}: ${interaction.data.name}`);
     if (wiki && await wiki.handle(interaction)) { if (knownCommand) console.log("Discord Gateway 명령 처리: 위키-제안"); return; }
-    await handleThreadSummaryInteraction({ interaction, token: config.discordToken, openAIKey: config.openAIKey, provider: config.summaryProvider, hermesUrl: config.hermesSummaryUrl, hermesKey: config.hermesSummaryKey, model: config.openAIModel, botUserId });
+    await handleThreadSummaryInteraction({ interaction, token: config.discordToken, openAIKey: config.openAIKey, provider: config.summaryProvider, hermesUrl: config.hermesSummaryUrl, hermesKey: config.hermesSummaryKey, model: config.openAIModel, botUserId, wikiServiceUrl: config.wikiServiceUrl, wikiServiceKey: config.wikiServiceKey });
   }, onMessage: (message: any) => mention?.handle(message),
     onError: (error: Error) => console.error(`Discord Gateway 처리에 실패했어요: ${error.message}`), onFatal: (code: number) => console.error(`Discord Gateway가 종료됐어요. close code: ${code}.`) });
   process.once("SIGINT", () => clearInterval(timer)); process.once("SIGTERM", () => clearInterval(timer));

@@ -10,6 +10,10 @@ Hermes의 Wiki MCP OAuth 갱신이 400으로 실패해 검색 도구를 등록�
 - Node Gateway의 위키 멘션 처리 버전을 배포한다. 기존 `/위키-제안`과 참여자 승인 절차를 재사용한다.
 - `configure_wiki_runtime.py --enable-mention-routing`으로 기존 서비스 키를 Hermes 환경 파일에 연결한다. 키를 로그나 저장소에 넣지 않는다. 모델은 기존 ChatGPT OAuth의 `gpt-6-luna`, 기본 추론은 `max`, 처리 요청은 `priority`다.
 - `wiki_routing_patch.py ~/.hermes/hermes-agent/plugins/platforms/discord/adapter.py`를 적용하고 Hermes Gateway를 재시작한다. 허용 채널의 직접 멘션 갱신 요청은 Node가 처리한다. 일반 대화와 봇 답글 회신은 Hermes가 처리한다.
+
+- 갱신된 `framework-wiki-reader`는 일반 문서 질문에도 `get_sources_context`로 위키와 노션을 함께 확인한다. Wiki 서버의 Notion 기능 배포 후 스킬을 설치하고 MCP 도구 목록을 다시 로드한다.
+- `mention_policy_patch.py`는 진행 중인 요청과 같은 작성자·서버·채널의 후속 메시지도 받는다. 작업이 끝나면 일반 채널에서 다시 멘션이나 봇 답글 회신이 필요하다. 다른 작성자의 일반 채널 메시지는 새 요청으로 받지 않는다.
+- `configure_wiki_runtime.py`는 `display.busy_input_mode=steer`를 설정한다. 진행 중에 들어온 범위 수정은 현재 에이전트에 전달하고, 최신 제외 지시를 최종 답변에 반영하도록 스킬에서 안내한다. 재시작 전에 진행 중인 요청을 확인한다.
 - `framework-thread-summary`와 `framework-wiki-inference`도 갱신한다. 요약과 위키 변경안은 max로 요청한다. 웹은 max를 기본으로 시작하며 사용자가 강도를 선택할 수 있다.
 
 설정 도구는 수정 전 파일을 `~/.hermes/backups/framework-wiki-<timestamp>`에 권한 600으로 보관한다. 라우팅 패치는 원본 옆 `.framework-before-wiki-routing`에 백업하며, 예상한 코드가 없으면 중단한다. 되돌릴 때는 백업을 복원하고 서비스를 재시작한다.

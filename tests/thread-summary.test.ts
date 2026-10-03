@@ -3,7 +3,7 @@ import test from "node:test";
 import { buildThreadTranscript, formatThreadSummary, threadSummaryCommandDefinition } from "../src/thread-summary.js";
 
 test("메인 버전과 같은 스레드 정리 명령과 익명 시간순 대화문을 만들어요", () => {
-  assert.deepEqual(threadSummaryCommandDefinition(), { name: "스레드-정리", description: "현재 스레드를 시간 순 타임라인으로 정리해요.", type: 1, dm_permission: false });
+  assert.deepEqual(threadSummaryCommandDefinition(), { name: "스레드-정리", description: "현재 스레드를 시간 순 타임라인으로 정리해요.", type: 1, dm_permission: false, options: [{ type: 5, name: "노션참고", description: "스레드의 Notion 링크 원문을 참고 문서로 읽어요.", required: false }] });
   assert.equal(buildThreadTranscript({ botUserId: "999", messages: [{ timestamp: "2026-08-11T02:00:00Z", author: { id: "2" }, content: "확인했어요." }, { timestamp: "2026-08-11T01:00:00Z", author: { id: "1" }, content: "<@2> 확인 부탁해요." }, { timestamp: "2026-08-11T03:00:00Z", author: { id: "999" }, content: "요약" }] }), "[2026-08-11T01:00:00.000Z] 참여자 1: @참여자 2 확인 부탁해요.\n[2026-08-11T02:00:00.000Z] 참여자 2: 확인했어요.");
 });
 
