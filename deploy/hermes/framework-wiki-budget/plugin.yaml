@@ -1,0 +1,6 @@
+name: framework-wiki-budget
+version: 0.1.0
+description: Bound ordinary Discord Wiki questions while preserving saved conversation history.
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
