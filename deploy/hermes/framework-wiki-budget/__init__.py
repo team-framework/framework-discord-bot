@@ -9,7 +9,7 @@ import time
 log = logging.getLogger(__name__)
 TOPIC = re.compile(r'framework|innolive|inno live|이노라이브|위키|노션|notion', re.I)
 LOOKUP = re.compile(r'알려|설명|요약|정리|찾아|변천|변화|현황|목록|링크|무엇|뭐|어떻|읽|볼 수|show|explain|summari|history|list|find', re.I)
-DEEP_OR_WRITE = re.compile(r'심층|자세히|상세히|꼼꼼|전부|모든 문서|끝까지|deep research|exhaustive|고쳐|수정해|수정해줘|작성해|구현해|코드.*(?:분석|확인|검토)|배포|커밋|실행해|갱신|업데이트해|삭제|등록해|보내|전송', re.I)
+DEEP_OR_WRITE = re.compile(r'심층|자세히|상세히|꼼꼼|전부|모든 문서|끝까지|deep research|exhaustive|코드|로그|실서버|운영 서버|GPU 서버|실제 실행|고쳐|수정해|수정해줘|작성해|구현해|코드.*(?:분석|확인|검토)|배포|커밋|실행해|갱신|업데이트해|삭제|등록해|보내|전송', re.I)
 FOLLOWUP = re.compile(r'이 문서|그 문서|이 모델|그 모델|방금|앞서|이 중|그중|그러면|그럼|후속')
 SOURCE = 'mcp__framework_wiki__'
 READS = {'get_sources_context', 'search_notion', 'read_notion_page', 'search', 'get_context', 'get_note_outline', 'read_sections', 'get_wiki_status', 'list_notes'}

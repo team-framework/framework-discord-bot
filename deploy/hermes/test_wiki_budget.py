@@ -16,7 +16,7 @@ class BudgetTests(unittest.TestCase):
     def test_intent_preserves_actions_and_deep_research(self):
         for q in ['innolive AI 모델의 변천사를 알려줘','Framework 노션 보고서 목록 찾아줘','위키 서버 구조 설명해줘']:
             self.assertTrue(m.ordinary_question(q))
-        for q in ['innolive 코드를 수정해줘','Framework 모든 문서를 조사하고 정리해줘','위키에 이 결과 보내줘','innolive 코드 분석해줘','Notion 상세히 알려줘','날씨 알려줘']:
+        for q in ['innolive 코드를 수정해줘','Framework 모든 문서를 조사하고 정리해줘','위키에 이 결과 보내줘','innolive 코드 분석해줘','innolive 코드 동작 알려줘','innolive GPU 서버 상태 알려줘','Notion 상세히 알려줘','날씨 알려줘']:
             self.assertFalse(m.ordinary_question(q),q)
         history=[{'role':'user','content':'innolive AI 모델 알려줘'}]
         self.assertTrue(m.ordinary_question('그 모델의 실험 보고서를 찾아줘',history))
