@@ -8,7 +8,7 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import AsyncMock, patch
 import yaml
-from configure_wiki_runtime import configure
+from configure_wiki_runtime import configure, WIKI_HINT
 from wiki_routing_patch import HELPER, ANCHOR, GATE, patched
 
 
@@ -40,6 +40,8 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn('auth', mcp); self.assertNotIn('oauth', mcp)
             self.assertEqual(mcp['headers']['Authorization'], 'Bearer ${FRAMEWORK_WIKI_SERVICE_KEY}')
             self.assertEqual(mcp['headers']['X-Test'], 'keep')
+            self.assertTrue(mcp['refresh_tools_on_keepalive'])
+            self.assertIn(WIKI_HINT, cfg['platform_hints']['discord']['append'])
             self.assertNotIn('k' * 40, (home / 'config.yaml').read_text())
             self.assertIn('EXISTING_VALUE=keep', (home / '.env').read_text())
             self.assertEqual((backup / 'hermes.env').stat().st_mode & 0o777, 0o600)
@@ -60,6 +62,30 @@ class RuntimeTests(unittest.TestCase):
             wiki.write_text('WIKI_SERVICE_KEY=short\n')
             with self.assertRaises(ValueError): configure(home, wiki, [bot])
             self.assertEqual((home / 'config.yaml').read_text(), before)
+
+    def test_preserves_platform_hints_and_repeat_does_not_duplicate(self):
+        with TemporaryDirectory() as tmp:
+            home, wiki, bot = self.setup_home(Path(tmp))
+            config = yaml.safe_load((home / 'config.yaml').read_text())
+            config['platform_hints'] = {'cli': 'CLI 유지', 'discord': {'replace': 'Discord 기본 문체', 'append': '기존 범위 유지'}}
+            (home / 'config.yaml').write_text(yaml.safe_dump(config))
+            configure(home, wiki, [bot]); configure(home, wiki, [bot])
+            hints = yaml.safe_load((home / 'config.yaml').read_text())['platform_hints']
+            self.assertEqual(hints['cli'], 'CLI 유지')
+            self.assertEqual(hints['discord']['replace'], 'Discord 기본 문체')
+            self.assertTrue(hints['discord']['append'].startswith('기존 범위 유지'))
+            self.assertEqual(hints['discord']['append'].count(WIKI_HINT), 1)
+
+    def test_malformed_hint_does_not_change_runtime(self):
+        with TemporaryDirectory() as tmp:
+            home, wiki, bot = self.setup_home(Path(tmp))
+            config = yaml.safe_load((home / 'config.yaml').read_text())
+            config['platform_hints'] = {'discord': {'append': ['잘못된 형식']}}
+            (home / 'config.yaml').write_text(yaml.safe_dump(config))
+            before = (home / 'config.yaml').read_text()
+            with self.assertRaises(ValueError): configure(home, wiki, [bot])
+            self.assertEqual((home / 'config.yaml').read_text(), before)
+            self.assertFalse((home / 'backups').exists())
 
 
 class RoutingTests(unittest.TestCase):

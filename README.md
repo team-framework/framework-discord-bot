@@ -64,3 +64,14 @@ docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.hermes.y
 ```
 
 `/healthz`는 브리지 프로세스 상태만 검사합니다. 인증과 모델 사용 가능 여부는 실제 요약 요청으로 검증해야 합니다. 요청이 실패해도 유료 OpenAI API로 자동 전환하지 않습니다.
+
+## 일반 문서 질문의 조회 제한
+
+`deploy/hermes/configure_wiki_budget.py`는 사용자 Hermes 홈에 `framework-wiki-budget` 플러그인을 설치하고 기존 설정을 비공개 백업합니다. 배치 후 Gateway를 재시작합니다. 플러그인은 Discord의 일반 Framework·InnoLive 문서 질문에만 적용됩니다. 심층 조사와 수정·배포 요청은 기존 경로를 사용합니다.
+
+일반 질문은 문서 조회를 3회로 제한하고, 네 번째 모델 요청부터 도구 없이 답변합니다. 90초가 지나면 추가 조회를 중단합니다. 이미 진행 중인 모델·문서 요청은 이 제한으로 취소하지 않으므로 전체 응답 시간의 상한은 아닙니다. 과거 도구 출력은 요청에서 제외하고 최근 일반 대화는 8,000자 이내로 선택합니다. 이번 질문의 도구 호출과 결과 쌍, 시스템 지침, 저장된 대화 기록은 보존합니다. 기존 `gpt-6-luna`·`max` 추론 설정을 유지합니다.
+
+```bash
+python deploy/hermes/configure_wiki_budget.py --hermes-home /home/chaeyn/.hermes
+python -m unittest discover -s deploy/hermes -p 'test_*.py'
+```
