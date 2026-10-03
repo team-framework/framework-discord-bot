@@ -27,7 +27,7 @@ def text_of(message):
 def ordinary_question(text, history=()):
     if DEEP_OR_WRITE.search(text) or not LOOKUP.search(text): return False
     if TOPIC.search(text): return True
-    return bool(FOLLOWUP.search(text) and any(TOPIC.search(text_of(m)) for m in history[-6:] if m.get('role') == 'user'))
+    return bool(FOLLOWUP.search(text) and any(TOPIC.search(text_of(m)) for m in [row for row in history if row.get('role') == 'user'][-3:]))
 
 
 def select_messages(messages, old_chars=8000):

@@ -20,6 +20,8 @@ class BudgetTests(unittest.TestCase):
             self.assertFalse(m.ordinary_question(q),q)
         history=[{'role':'user','content':'innolive AI 모델 알려줘'}]
         self.assertTrue(m.ordinary_question('그 모델의 실험 보고서를 찾아줘',history))
+        history += [{'role':'tool','content':'evidence'} for _ in range(12)]
+        self.assertTrue(m.ordinary_question('그 모델의 실험 보고서를 찾아줘',history))
 
     def test_current_tool_pairs_and_saved_history_preserved(self):
         history=[{'role':'system','content':'keep'}, {'role':'user','content':'old'}, {'role':'assistant','tool_calls':[{'id':'oldcall'}]}, {'role':'tool','tool_call_id':'oldcall','content':'x'*200000}, {'role':'assistant','content':'old answer'}, {'role':'user','content':'current'}, {'type':'function_call','call_id':'new','name':'read'}, {'type':'function_call_output','call_id':'new','output':'new evidence'}]
