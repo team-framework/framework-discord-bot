@@ -1,5 +1,5 @@
 [Unit]
-Description=Framework thread summaries via Hermes ChatGPT
+Description=Framework thread summaries via Hermes Claude
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/.hermes/hermes-agent
 EnvironmentFile=%h/apps/framework-discord-bot/.env.hermes
-ExecStart=%h/.hermes/hermes-agent/venv/bin/python %h/apps/framework-discord-bot/deploy/hermes/summary_bridge.py
+ExecStart=%h/apps/framework-discord-bot/deploy/hermes/run_with_hermes_python.sh %h/apps/framework-discord-bot/deploy/hermes/summary_bridge.py
 Restart=on-failure
 RestartSec=5
 UMask=0077
